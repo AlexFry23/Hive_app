@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проверка микрофона</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main id="screen">
+  <div class="row-head"><a class="btn small" href="/">‹ Назад</a></div>
+  <h2>Проверка микрофона</h2>
+  <p class="status" style="text-align:left">Запишет 5 секунд и даст послушать. Запись никуда не отправляется — только проверка, работает ли микрофон внутри Telegram.</p>
+  <button id="rec" class="btn wide" type="button">Записать 5 секунд</button>
+  <p id="out" class="status"></p>
+  <audio id="play" controls hidden style="width:100%"></audio>
+</main>
+<script>
+(function () {
+  var tg = window.Telegram && window.Telegram.WebApp; if (tg) tg.ready();
+  var out = document.getElementById('out');
+  var ua = navigator.userAgent;
+  function say(t) { out.textContent = t; }
+  document.getElementById('rec').addEventListener('click', function () {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { say('Нет доступа к микрофону в этом окне (getUserMedia отсутствует). ' + ua); return; }
+    if (!window.MediaRecorder) { say('Микрофон есть, но запись не поддерживается (нет MediaRecorder). ' + ua); return; }
+    say('Разрешите микрофон…');
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      var chunks = [], rec = new MediaRecorder(stream);
+      rec.ondataavailable = function (e) { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = function () {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        var blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+        var a = document.getElementById('play'); a.src = URL.createObjectURL(blob); a.hidden = false;
+        say('Записано: ' + Math.round(blob.size / 1024) + ' КБ, формат ' + (rec.mimeType || 'неизвестен') + '. Послушайте и пришлите снимок экрана.');
+      };
+      rec.start(); say('Говорите… 5 секунд');
+      setTimeout(function () { rec.stop(); }, 5000);
+    }).catch(function (e) { say('Микрофон не дали: ' + e.name + ' — ' + e.message); });
+  });
+})();
+</script>
+</body>
+</html>
