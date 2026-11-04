@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Офис</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main id="screen">
+  <section id="tab-today" class="tab" hidden>
+    <div class="stub">
+      <img src="/avatars/michael.svg" alt="" class="px stub-img">
+      <p>Напоминания и сроки на 7 дней появятся здесь.</p>
+    </div>
+  </section>
+
+  <section id="tab-waiting" class="tab">
+    <div id="deck-status" class="status">Загружаю вопросы…</div>
+    <div id="deck" hidden>
+      <article class="card">
+        <header class="card-head">
+          <img id="card-avatar" class="px avatar" alt="">
+          <div class="who">
+            <div id="card-agent" class="agent"></div>
+            <div id="card-project" class="project" hidden></div>
+          </div>
+        </header>
+        <p id="card-question" class="question"></p>
+        <textarea class="answer" placeholder="Ответ — скоро" disabled></textarea>
+      </article>
+      <nav class="deck-nav">
+        <button id="prev" class="btn" type="button">‹</button>
+        <span id="counter" class="counter"></span>
+        <button id="next" class="btn" type="button">›</button>
+      </nav>
+    </div>
+    <div id="empty" class="stub" hidden>
+      <img src="/avatars/pam.svg" alt="" class="px stub-img">
+      <p>Всё отвечено.</p>
+    </div>
+  </section>
+
+  <section id="tab-projects" class="tab" hidden>
+    <div id="projects-status" class="status">Загружаю проекты…</div>
+    <ul id="projects" class="projects"></ul>
+  </section>
+</main>
+
+<nav class="tabs">
+  <button data-tab="today" type="button">Сегодня</button>
+  <button data-tab="waiting" type="button" class="active">Ждёт меня</button>
+  <button data-tab="projects" type="button">Проекты</button>
+</nav>
+<script src="/app.js"></script>
+</body>
+</html>

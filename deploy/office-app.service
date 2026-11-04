@@ -1,0 +1,26 @@
+[Unit]
+Description=Мини-приложение Александра (office-app)
+After=network-online.target hive-registry.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=office-app
+Group=office-app
+WorkingDirectory=/opt/office-app
+EnvironmentFile=/opt/office-app/.env
+# Ключ реестра улья: systemd читает его от root и отдаёт только этой службе.
+# Права /opt/hive-registry и access.key не меняются (решение 16).
+LoadCredential=registry.key:/opt/hive-registry/access.key
+ExecStart=/usr/bin/python3 /opt/office-app/app/server.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/office-app/data
+
+[Install]
+WantedBy=multi-user.target
