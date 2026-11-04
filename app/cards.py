@@ -66,8 +66,12 @@ def project_label(r, projects):
 
 
 def question_text(r):
+    """Текст вопроса. humanqa.q у старых записей бывает строкой таблицы («| К2 | …») — тогда заголовок."""
     qa = r.get('humanqa') or {}
-    return str(qa.get('q') or r.get('title') or '').strip()
+    q = str(qa.get('q') or '').strip()
+    if not q or q.startswith('|'):
+        q = str(r.get('title') or '').strip()
+    return q
 
 
 def make_cards(records, projects=()):

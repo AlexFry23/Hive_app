@@ -9,32 +9,47 @@
 </head>
 <body>
 <main id="screen">
+  <!-- Сегодня -->
   <section id="tab-today" class="tab" hidden>
-    <div class="stub">
-      <img src="/avatars/michael.svg" alt="" class="px stub-img">
-      <p>Напоминания и сроки на 7 дней появятся здесь.</p>
+    <div class="row-head">
+      <h2 id="today-range">Сегодня</h2>
+      <button id="add-reminder" class="btn small" type="button">+ Напомнить</button>
     </div>
+    <div id="today-status" class="status">Загружаю…</div>
+    <ul id="today-list" class="list"></ul>
   </section>
 
+  <!-- Ждёт меня -->
   <section id="tab-waiting" class="tab">
     <div id="deck-status" class="status">Загружаю вопросы…</div>
     <div id="deck" hidden>
-      <article class="card">
-        <header class="card-head">
-          <img id="card-avatar" class="px avatar" alt="">
-          <div class="who">
-            <div id="card-agent" class="agent"></div>
-            <div id="card-project" class="project" hidden></div>
+      <div id="stack" class="stack">
+        <article id="card" class="card">
+          <header class="card-head">
+            <img id="card-avatar" class="px avatar" alt="">
+            <div class="who">
+              <div id="card-agent" class="agent"></div>
+              <div id="card-project" class="project" hidden></div>
+            </div>
+            <button id="card-menu" class="menu-btn" type="button" aria-label="Меню">⋯</button>
+          </header>
+          <p id="card-question" class="question"></p>
+          <div class="answer-row">
+            <textarea id="card-answer" class="answer" rows="2" placeholder="Ответить текстом"></textarea>
+            <button id="send" class="btn send" type="button" disabled>➤</button>
           </div>
-        </header>
-        <p id="card-question" class="question"></p>
-        <textarea class="answer" placeholder="Ответ — скоро" disabled></textarea>
-      </article>
+          <div id="stamp" class="stamp" hidden></div>
+        </article>
+      </div>
       <nav class="deck-nav">
-        <button id="prev" class="btn" type="button">‹</button>
-        <span id="counter" class="counter"></span>
-        <button id="next" class="btn" type="button">›</button>
+        <button id="btn-no" class="btn wide" type="button">Нет</button>
+        <button id="btn-later" class="btn wide" type="button">Отложить</button>
+        <button id="btn-yes" class="btn wide yes" type="button">Да</button>
       </nav>
+      <div class="deck-foot">
+        <span id="counter" class="counter"></span>
+        <button id="btn-skip" class="link" type="button">пропустить</button>
+      </div>
     </div>
     <div id="empty" class="stub" hidden>
       <img src="/avatars/pam.svg" alt="" class="px stub-img">
@@ -42,9 +57,21 @@
     </div>
   </section>
 
+  <!-- Проекты -->
   <section id="tab-projects" class="tab" hidden>
-    <div id="projects-status" class="status">Загружаю проекты…</div>
-    <ul id="projects" class="projects"></ul>
+    <div id="projects-view">
+      <div id="projects-status" class="status">Загружаю проекты…</div>
+      <ul id="projects" class="list"></ul>
+    </div>
+    <div id="project-view" hidden>
+      <div class="row-head">
+        <button id="back" class="btn small" type="button">‹ Проекты</button>
+        <button id="add-task" class="btn small" type="button">+ Задача</button>
+      </div>
+      <h2 id="project-title"></h2>
+      <div id="tasks-status" class="status"></div>
+      <ul id="tasks" class="list"></ul>
+    </div>
   </section>
 </main>
 
@@ -53,6 +80,45 @@
   <button data-tab="waiting" type="button" class="active">Ждёт меня</button>
   <button data-tab="projects" type="button">Проекты</button>
 </nav>
+
+<!-- нижние листы -->
+<div id="sheet-bg" class="sheet-bg" hidden></div>
+
+<div id="sheet-snooze" class="sheet" hidden>
+  <h3>Вернуть карточку</h3>
+  <button class="btn wide" data-days="1" type="button">Через 1 день</button>
+  <button class="btn wide" data-days="3" type="button">Через 3 дня</button>
+  <button class="btn wide" data-days="5" type="button">Через 5 дней</button>
+  <label class="field">Выбрать дату <input id="snooze-date" type="date"></label>
+  <button id="snooze-date-ok" class="btn wide" type="button">В этот день</button>
+  <button class="link close" type="button">отмена</button>
+</div>
+
+<div id="sheet-menu" class="sheet" hidden>
+  <button id="menu-remove" class="btn wide danger" type="button">Снять — больше не спрашивать</button>
+  <button class="link close" type="button">отмена</button>
+</div>
+
+<div id="sheet-reminder" class="sheet" hidden>
+  <h3>Напоминание</h3>
+  <label class="field">Что <input id="rem-text" type="text" maxlength="1000"></label>
+  <label class="field">Когда (по Москве) <input id="rem-at" type="datetime-local"></label>
+  <button id="rem-save" class="btn wide" type="button">Сохранить</button>
+  <button class="link close" type="button">отмена</button>
+</div>
+
+<div id="sheet-task" class="sheet" hidden>
+  <h3 id="task-sheet-title">Задача</h3>
+  <label class="field">Название <input id="task-title" type="text" maxlength="500"></label>
+  <label class="field">Срок <input id="task-due" type="date"></label>
+  <label class="field">Кто делает <select id="task-assignee"></select></label>
+  <label class="check"><input id="task-done" type="checkbox"> Сделано</label>
+  <button id="task-save" class="btn wide" type="button">Сохранить</button>
+  <button id="task-delete" class="link danger-text" type="button" hidden>удалить задачу</button>
+  <button class="link close" type="button">отмена</button>
+</div>
+
+<div id="toast" class="toast" hidden></div>
 <script src="/app.js"></script>
 </body>
 </html>

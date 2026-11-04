@@ -42,6 +42,18 @@ def session_cookie(key, lifetime=3600, now=None):
     return expiry + '.' + hmac.new(key.encode(), expiry.encode(), hashlib.sha256).hexdigest()
 
 
+class Conflict(RegistryError):
+    """HTTP 409: запись изменилась, нужна свежая ревизия."""
+
+
+class Unconfirmed(RegistryError):
+    """Ответ не получен (таймаут, 503): записалось ли — неизвестно."""
+
+
+# Origin страницы реестра: сам реестр принимает POST только «со своей страницы».
+ORIGIN = 'https://qa.afhive.tech:8443'
+
+
 class Registry:
     def __init__(self, base_url, key, cache_seconds=60, timeout=30):
         self.base = base_url.rstrip('/')
@@ -52,8 +64,11 @@ class Registry:
         self._state = None
         self._at = 0.0
 
-    def _get(self, path, auth=True):
-        req = urllib.request.Request(self.base + path)
+    def _get(self, path, auth=True, data=None):
+        req = urllib.request.Request(self.base + path, data=data)
+        if data is not None:
+            req.add_header('Content-Type', 'application/json')
+            req.add_header('Origin', ORIGIN)
         if auth:
             if not self.key:
                 raise RegistryError('нет ключа реестра')
@@ -62,8 +77,18 @@ class Registry:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 return json.loads(resp.read().decode('utf-8'))
         except urllib.error.HTTPError as e:
-            raise RegistryError('реестр ответил ' + str(e.code))
+            try:
+                msg = json.loads(e.read().decode('utf-8')).get('error') or ''
+            except Exception:
+                msg = ''
+            if e.code == 409:
+                raise Conflict(msg or 'запись изменилась')
+            if e.code in (502, 503, 504) and data is not None:
+                raise Unconfirmed('реестр ответил ' + str(e.code))
+            raise RegistryError('реестр ответил ' + str(e.code) + (': ' + msg if msg else ''))
         except (urllib.error.URLError, OSError, ValueError) as e:
+            if data is not None:
+                raise Unconfirmed('нет ответа реестра: ' + type(e).__name__)
             raise RegistryError('реестр недоступен: ' + type(e).__name__)
 
     def health(self):
@@ -80,3 +105,16 @@ class Registry:
         with self._lock:
             self._state, self._at = data, time.time()
         return data
+
+    def record(self, record_id):
+        return self._get('/api/record?' + urllib.parse.urlencode({'id': record_id}))
+
+    def update(self, req):
+        body = json.dumps(req, ensure_ascii=False).encode('utf-8')
+        result = self._get('/api/update', data=body)
+        self.invalidate()
+        return result
+
+    def invalidate(self):
+        with self._lock:
+            self._state = None
