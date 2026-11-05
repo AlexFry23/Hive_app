@@ -7,10 +7,12 @@
     tg.expand();
     if (tg.disableVerticalSwipes) tg.disableVerticalSwipes(); // свайп вниз не сворачивает приложение
   }
-  var meta = { assignees: {}, agents: {} };
+  var meta = { assignees: {}, agents: {}, skip_days: 3 };
+  var ASSIGNEE_ORDER = ['michael', 'pam', 'oscar', 'kevin', 'dwight', 'me'];
 
   function $(id) { return document.getElementById(id); }
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function nice(name) { return String(name || '').replace(/_/g, ' '); }
   function haptic(kind) {
     if (!tg || !tg.HapticFeedback) return;
     if (kind === 'ok') tg.HapticFeedback.notificationOccurred('success');
@@ -27,6 +29,7 @@
     if (tg && tg.showConfirm) { try { tg.showConfirm(text, cb); return; } catch (e) { /* старый клиент */ } }
     cb(window.confirm(text));
   }
+  function store(key, value) { try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch (e) { return null; } }
 
   function api(path, body) {
     var opt = { headers: { Authorization: 'tma ' + initData } };
@@ -43,15 +46,19 @@
     });
   }
 
-  // ---------- даты ----------
+  // ---------- даты (всегда по Москве) ----------
   var TZ = 'Europe/Moscow';
   function dayDate(iso) { var p = iso.split('-'); return new Date(Date.UTC(+p[0], p[1] - 1, +p[2], 12)); }
+  function shortDay(iso) {
+    var o = { day: 'numeric', month: 'long', timeZone: TZ };
+    if (iso.slice(0, 4) !== mskInput(Date.now()).slice(0, 4)) o.year = 'numeric';
+    return dayDate(iso).toLocaleDateString('ru-RU', o);
+  }
   function dayLabel(iso, todayIso) {
     var s = dayDate(iso).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long', timeZone: TZ });
     if (iso === todayIso) return 'Сегодня, ' + s;
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
-  // время всегда по Москве, независимо от часового пояса телефона (сервер считает так же)
   var mskFmt = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
   function mskInput(ms) { return mskFmt.format(new Date(ms)).replace(' ', 'T').slice(0, 16); }
   function tomorrowIso() { return mskInput(Date.now() + 86400000).slice(0, 10); }
@@ -62,6 +69,7 @@
   function closeSheet() { if (openSheet) openSheet.hidden = true; openSheet = null; $('sheet-bg').hidden = true; }
   $('sheet-bg').addEventListener('click', closeSheet);
   document.querySelectorAll('.sheet .close').forEach(function (b) { b.addEventListener('click', closeSheet); });
+  $('help').addEventListener('click', function () { showSheet('sheet-help'); });
 
   // ---------- вкладки ----------
   var tabs = document.querySelectorAll('.tabs button');
@@ -71,35 +79,72 @@
       ['today', 'waiting', 'projects'].forEach(function (t) { $('tab-' + t).hidden = t !== b.dataset.tab; });
       if (b.dataset.tab === 'today') loadToday();
       if (b.dataset.tab === 'projects') loadProjects();
+      if (b.dataset.tab === 'waiting') loadCards();
       haptic('tick');
     });
   });
 
   // ---------- «Ждёт меня» ----------
-  var cards = [], busy = false;
+  var cards = [], deferred = { count: 0, next: null }, busy = false, chosen = null, projectList = null;
   var card = $('card'), answer = $('card-answer');
 
   function current() { return cards[0]; }
+  function deferredText() {
+    if (!deferred.count) return '';
+    var t = 'Ещё отложено: ' + deferred.count + (deferred.next ? ', следующий вернётся ' + shortDay(deferred.next) : '');
+    return /\.$/.test(t) ? t : t + '.';
+  }
+  function renderAssignees(c) {
+    var box = $('assignees'); box.innerHTML = '';
+    chosen = c.assignee || c.agent;
+    ASSIGNEE_ORDER.forEach(function (k) {
+      var b = el('button'); b.type = 'button';
+      if (k === 'me') b.appendChild(el('span', 'me', 'Я'));
+      else { var i = el('img'); i.src = '/img/' + k + '.webp'; i.alt = ''; b.appendChild(i); }
+      b.appendChild(el('span', '', k === 'me' ? 'сам' : (meta.agents[k] || k)));
+      b.classList.toggle('on', k === chosen);
+      b.addEventListener('click', function () {
+        chosen = k; c.assignee = k;
+        box.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
+        haptic('tick');
+      });
+      box.appendChild(b);
+    });
+  }
   function render() {
     $('deck-status').textContent = '';
-    if (!cards.length) { $('deck').hidden = true; $('empty').hidden = false; return; }
+    $('counter').textContent = cards.length ? 'Ждут ответа: ' + cards.length : '';
+    if (!cards.length) {
+      $('deck').hidden = true; $('empty').hidden = false;
+      $('empty-deferred').textContent = deferredText() || 'Отложенных нет.';
+      return;
+    }
     $('empty').hidden = true; $('deck').hidden = false;
     var c = current();
-    $('card-avatar').src = '/avatars/' + c.agent + '.svg';
+    $('card-avatar').src = '/img/' + c.agent + '.webp';
     $('card-agent').textContent = c.agent_name;
     $('card-question').textContent = c.question;
-    $('card-project').hidden = !c.project;
-    $('card-project').textContent = c.project || '';
+    var ol = $('card-options'); ol.innerHTML = '';
+    (c.options || []).forEach(function (o) { ol.appendChild(el('li', '', o)); });
+    $('more').hidden = !c.full; $('card-full').hidden = true; $('card-full').textContent = c.full || ''; $('more').textContent = 'подробнее';
+    var chip = $('card-project');
+    chip.textContent = c.project ? nice(c.project) : '+ Проект';
+    chip.className = 'chip' + (c.project ? '' : ' empty');
+    renderAssignees(c);
     answer.value = c.draft || '';
     $('send').disabled = !answer.value.trim();
-    $('counter').textContent = 'осталось ' + cards.length;
+    $('deferred').textContent = deferredText();
     card.className = 'card'; card.style.transform = ''; card.style.opacity = '';
     $('stamp').hidden = true;
   }
   answer.addEventListener('input', function () { $('send').disabled = !answer.value.trim(); });
+  $('more').addEventListener('click', function () {
+    var f = $('card-full'); f.hidden = !f.hidden; $('more').textContent = f.hidden ? 'подробнее' : 'свернуть';
+  });
 
-  function done(msg) {
+  function done(msg, later) {
     cards.shift(); haptic('ok'); if (msg) toast(msg);
+    if (later) { deferred.count++; if (!deferred.next || later < deferred.next) deferred.next = later; }
     render();
   }
   function fail(e) { haptic('err'); toast(e.message); card.className = 'card back'; card.style.transform = ''; card.style.opacity = ''; $('stamp').hidden = true; }
@@ -112,19 +157,20 @@
     if (flyTo) fly(flyTo[0], flyTo[1]);
     api('/api/cards/' + encodeURIComponent(c.id) + '/' + verb, body || {}).then(function (r) {
       busy = false;
-      done(r.status === 'already' ? 'Вопрос уже закрыт в улье' : okMsg);
+      var later = r.until ? mskInput(Date.parse(r.until)).slice(0, 10) : null;
+      done(r.status === 'already' ? 'Вопрос уже закрыт в улье' : okMsg, later);
     }).catch(function (e) { busy = false; fail(e); });
   }
-  function doYes() { act('yes', { text: answer.value }, 'Записано: «Да»', [600, 0]); }
-  function doNo() { act('no', { draft: answer.value }, 'Вернётся через 7 дней', [-600, 0]); }
+  function doYes() { act('yes', { text: answer.value, assignee: chosen }, 'Записано: «Да»', [600, 0]); }
+  function doNo() { act('no', { draft: answer.value }, 'Не сейчас — вернётся через 3 дня', [-600, 0]); }
   function doSnooze(body) { closeSheet(); body.draft = answer.value; act('snooze', body, 'Отложено', [0, -800]); }
+  function askSnooze() { $('snooze-date').min = tomorrowIso(); showSheet('sheet-snooze'); }
   $('btn-yes').addEventListener('click', doYes);
   $('btn-no').addEventListener('click', doNo);
-  $('btn-later').addEventListener('click', function () { $('snooze-date').min = tomorrowIso(); showSheet('sheet-snooze'); });
-  $('btn-skip').addEventListener('click', function () { act('skip', { draft: answer.value }, 'Вернётся через ' + meta.skip_days + ' дн.', [0, 0]); });
+  $('btn-later').addEventListener('click', askSnooze);
   $('send').addEventListener('click', function () {
     if (!answer.value.trim()) return;
-    act('answer', { text: answer.value }, 'Ответ записан', [600, 0]);
+    act('answer', { text: answer.value, assignee: chosen }, 'Ответ записан', [600, 0]);
   });
   document.querySelectorAll('#sheet-snooze [data-days]').forEach(function (b) {
     b.addEventListener('click', function () { doSnooze({ days: +b.dataset.days }); });
@@ -139,11 +185,36 @@
     confirmBox('Снять вопрос и больше не спрашивать?', function (ok) { if (ok) act('remove', {}, 'Снято', [0, 600]); });
   });
 
+  // выбор проекта на карточке (хранится в приложении, решение 26)
+  function withProjects(cb) {
+    if (projectList) return cb(projectList);
+    api('/api/projects').then(function (b) { projectList = b.projects || []; cb(projectList); }).catch(function (e) { toast(e.message); });
+  }
+  $('card-project').addEventListener('click', function () {
+    var c = current(); if (!c) return;
+    withProjects(function (list) {
+      var ul = $('project-choices'); ul.innerHTML = '';
+      var none = el('li', c.project_id ? '' : 'on'); none.appendChild(el('div', 'main', 'Без проекта')); ul.appendChild(none);
+      none.addEventListener('click', function () { setProject(c, null, null); });
+      list.forEach(function (p) {
+        var li = el('li', p.id === c.project_id ? 'on' : ''); li.appendChild(el('div', 'main', nice(p.name)));
+        li.addEventListener('click', function () { setProject(c, p.id, p.name); });
+        ul.appendChild(li);
+      });
+      showSheet('sheet-project');
+    });
+  });
+  function setProject(c, id, name) {
+    api('/api/cards/' + encodeURIComponent(c.id) + '/project', { project_id: id }).then(function () {
+      c.project_id = id; c.project = name; closeSheet(); haptic('ok'); render();
+    }).catch(function (e) { toast(e.message); });
+  }
+
   // жесты: вправо — да, влево — нет, вверх — отложить; вниз не используется
   var TH = 90, start = null;
   function stamp(kind, text) { var s = $('stamp'); s.hidden = !kind; s.className = 'stamp ' + (kind || ''); s.textContent = text || ''; }
   card.addEventListener('pointerdown', function (e) {
-    if (busy || e.target.closest('textarea,button')) return;
+    if (busy || e.target.closest('textarea,button,.full')) return;
     start = { x: e.clientX, y: e.clientY, id: e.pointerId };
     card.setPointerCapture(e.pointerId); card.className = 'card';
   });
@@ -162,14 +233,16 @@
     if (dx > TH && Math.abs(dx) > -dy) return doYes();
     if (dx < -TH && Math.abs(dx) > -dy) return doNo();
     stamp(null); card.className = 'card back'; card.style.transform = '';
-    if (-dy > TH) { haptic(); $('snooze-date').min = tomorrowIso(); showSheet('sheet-snooze'); }
+    if (-dy > TH) { haptic(); askSnooze(); }
   }
   card.addEventListener('pointerup', release);
   card.addEventListener('pointercancel', release);
 
   function loadCards() {
-    api('/api/cards').then(function (b) { cards = b.cards || []; render(); })
-      .catch(function (e) { $('deck-status').textContent = e.message; });
+    if (busy) return;
+    api('/api/cards').then(function (b) {
+      cards = b.cards || []; deferred = b.deferred || { count: 0, next: null }; render();
+    }).catch(function (e) { $('deck-status').textContent = e.message; });
   }
 
   // ---------- «Сегодня» ----------
@@ -177,7 +250,7 @@
     $('today-status').textContent = 'Загружаю…';
     api('/api/today').then(function (b) {
       var list = $('today-list'); list.innerHTML = '';
-      $('today-range').textContent = 'Неделя до ' + dayDate(b.to).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', timeZone: TZ });
+      $('today-range').textContent = 'Неделя до ' + shortDay(b.to);
       $('today-status').textContent = b.items.length ? '' : 'На неделю ничего нет.';
       var lastDay = null;
       b.items.forEach(function (it) {
@@ -196,9 +269,9 @@
         main.appendChild(el('div', '', it.title));
         var sub = [];
         if (it.time) sub.push(it.time);
-        if (it.kind === 'task') { sub.push('задача'); if (it.project) sub.push(it.project.replace(/_/g, ' ')); if (it.assignee) sub.push(meta.assignees[it.assignee] || it.assignee); }
+        if (it.kind === 'task') { sub.push('задача'); if (it.project) sub.push(nice(it.project)); if (it.assignee) sub.push(meta.assignees[it.assignee] || it.assignee); }
         if (it.kind === 'hive') sub.push('срок в улье');
-        if (it.overdue && it.day) sub.push(dayDate(it.day).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', timeZone: TZ }));
+        if (it.overdue && it.day) sub.push(shortDay(it.day));
         main.appendChild(el('div', 'sub', sub.join(' · ')));
         li.appendChild(main);
         list.appendChild(li);
@@ -218,43 +291,81 @@
 
   // ---------- «Проекты» ----------
   var project = null, editing = null;
+  function projectRow(p) {
+    var li = el('li');
+    var main = el('div', 'main');
+    main.appendChild(el('div', '', nice(p.name)));
+    var sub = [];
+    if (p.open) sub.push('в работе ' + p.open);
+    if (p.closed) sub.push('закрыто за неделю ' + p.closed);
+    if (p.open_tasks) sub.push('задач ' + p.open_tasks);
+    if (sub.length) main.appendChild(el('div', 'sub', sub.join(' · ')));
+    li.appendChild(main);
+    if (p.waiting) li.appendChild(el('span', 'tag hot', 'ждут ' + p.waiting));
+    li.addEventListener('click', function () { openProject(p); });
+    return li;
+  }
   function loadProjects() {
     $('project-view').hidden = true; $('projects-view').hidden = false;
     api('/api/projects').then(function (b) {
-      var list = $('projects'); list.innerHTML = '';
-      (b.projects || []).forEach(function (p) {
-        var li = el('li');
-        li.appendChild(el('div', 'main', p.name.replace(/_/g, ' ')));
-        if (p.open_tasks) li.appendChild(el('span', 'tag', String(p.open_tasks)));
-        li.addEventListener('click', function () { openProject(p); });
-        list.appendChild(li);
+      projectList = b.projects || [];
+      var list = $('projects'), others = $('others'); list.innerHTML = ''; others.innerHTML = '';
+      var rest = 0;
+      projectList.forEach(function (p) {
+        if (p.empty) { others.appendChild(projectRow(p)); rest++; } else list.appendChild(projectRow(p));
       });
-      $('projects-status').textContent = (b.projects || []).length ? '' : 'Список проектов пока не получен.';
+      $('others-toggle').hidden = !rest;
+      $('others-toggle').textContent = (others.hidden ? 'Остальные' : 'Скрыть остальные') + ' (' + rest + ')';
+      $('projects-status').textContent = projectList.length ? (list.children.length ? '' : 'Пока ни в одном проекте нет вопросов и задач.') : 'Список проектов пока не получен.';
     }).catch(function (e) { $('projects-status').textContent = e.message; });
   }
+  $('others-toggle').addEventListener('click', function () {
+    var o = $('others'); o.hidden = !o.hidden;
+    $('others-toggle').textContent = (o.hidden ? 'Остальные' : 'Скрыть остальные') + ' (' + o.children.length + ')';
+  });
   function openProject(p) {
     project = p;
     $('projects-view').hidden = true; $('project-view').hidden = false;
-    $('project-title').textContent = p.name.replace(/_/g, ' ');
+    $('project-title').textContent = nice(p.name);
     loadTasks();
   }
+  function section(title, items, render) {
+    if (!items.length) return;
+    var box = $('project-sections');
+    box.appendChild(el('h4', '', title + ' · ' + items.length));
+    var ul = el('ul', 'list'); items.forEach(function (i) { ul.appendChild(render(i)); }); box.appendChild(ul);
+  }
+  function hiveRow(i) {
+    var li = el('li'); li.style.cursor = 'default';
+    var main = el('div', 'main'); main.appendChild(el('div', '', i.title));
+    var sub = [i.type === 'question' ? 'вопрос' : 'задача улья'];
+    if (i.due) sub.push('срок ' + shortDay(String(i.due).slice(0, 10)));
+    main.appendChild(el('div', 'sub', sub.join(' · ')));
+    li.appendChild(main);
+    return li;
+  }
+  function taskRow(t) {
+    var li = el('li', t.done ? 'done' : '');
+    var main = el('div', 'main');
+    main.appendChild(el('div', '', t.title));
+    var sub = [];
+    if (t.due) sub.push('срок ' + shortDay(t.due));
+    if (t.assignee) sub.push(meta.assignees[t.assignee] || t.assignee);
+    main.appendChild(el('div', 'sub', sub.join(' · ')));
+    li.appendChild(main);
+    li.addEventListener('click', function () { editTask(t); });
+    return li;
+  }
   function loadTasks() {
-    $('tasks-status').textContent = 'Загружаю…';
+    $('tasks-status').textContent = 'Загружаю…'; $('project-sections').innerHTML = '';
     api('/api/projects/' + encodeURIComponent(project.id) + '/tasks').then(function (b) {
-      var list = $('tasks'); list.innerHTML = '';
-      $('tasks-status').textContent = b.tasks.length ? '' : 'Задач нет.';
-      b.tasks.forEach(function (t) {
-        var li = el('li', t.done ? 'done' : '');
-        var main = el('div', 'main');
-        main.appendChild(el('div', '', t.title));
-        var sub = [];
-        if (t.due) sub.push('срок ' + dayDate(t.due).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', timeZone: TZ }));
-        if (t.assignee) sub.push(meta.assignees[t.assignee] || t.assignee);
-        main.appendChild(el('div', 'sub', sub.join(' · ')));
-        li.appendChild(main);
-        li.addEventListener('click', function () { editTask(t); });
-        list.appendChild(li);
-      });
+      var g = b.registry || { waiting: [], open: [], closed: [] };
+      var total = b.tasks.length + g.waiting.length + g.open.length + g.closed.length;
+      $('tasks-status').textContent = total ? '' : 'Здесь пока пусто.';
+      section('Ждут тебя', g.waiting, hiveRow);
+      section('В работе в улье', g.open, hiveRow);
+      section('Мои задачи', b.tasks, taskRow);
+      section('Закрыто за 7 дней', g.closed, hiveRow);
     }).catch(function (e) { $('tasks-status').textContent = e.message; });
   }
   $('back').addEventListener('click', loadProjects);
@@ -296,6 +407,7 @@
     $('deck-status').textContent = 'Откройте приложение кнопкой в боте Telegram.';
     return;
   }
-  api('/api/meta').then(function (m) { meta = m; }).catch(function () {});
+  api('/api/meta').then(function (m) { meta = m; if (cards.length) render(); }).catch(function () {});
   loadCards();
+  if (!store('help-seen')) { showSheet('sheet-help'); store('help-seen', '1'); }
 })();

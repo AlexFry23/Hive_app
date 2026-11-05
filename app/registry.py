@@ -109,6 +109,20 @@ class Registry:
     def record(self, record_id):
         return self._get('/api/record?' + urllib.parse.urlencode({'id': record_id}))
 
+    def record_cached(self, record_id, revision):
+        """Полная запись, кэш по (id, ревизия): ревизия меняется при каждой правке записи."""
+        key = (record_id, revision)
+        with self._lock:
+            cache = self.__dict__.setdefault('_records', {})
+            if key in cache:
+                return cache[key]
+        rec = self.record(record_id)
+        with self._lock:
+            if len(cache) > 500:
+                cache.clear()
+            cache[key] = rec
+        return rec
+
     def update(self, req):
         body = json.dumps(req, ensure_ascii=False).encode('utf-8')
         result = self._get('/api/update', data=body)

@@ -11,67 +11,85 @@
 <main id="screen">
   <!-- Сегодня -->
   <section id="tab-today" class="tab" hidden>
-    <div class="row-head">
-      <h2 id="today-range">Сегодня</h2>
-      <button id="add-reminder" class="btn small" type="button">+ Напомнить</button>
+    <div class="panel">
+      <div class="row-head">
+        <h2 id="today-range">Сегодня</h2>
+        <button id="add-reminder" class="btn small" type="button">+ Напомнить</button>
+      </div>
+      <div id="today-status" class="status">Загружаю…</div>
+      <ul id="today-list" class="list"></ul>
+      <p class="center"><a href="/mic.html" class="link">проверить микрофон</a></p>
     </div>
-    <div id="today-status" class="status">Загружаю…</div>
-    <ul id="today-list" class="list"></ul>
-    <p class="status"><a href="/mic.html" class="link">проверить микрофон</a></p>
   </section>
 
   <!-- Ждёт меня -->
   <section id="tab-waiting" class="tab">
-    <div id="deck-status" class="status">Загружаю вопросы…</div>
+    <div class="deck-top">
+      <span id="counter" class="pill"></span>
+      <button id="help" class="pill round" type="button" aria-label="Подсказка">?</button>
+    </div>
+    <div id="deck-status" class="status on-bg">Загружаю вопросы…</div>
     <div id="deck" hidden>
       <div id="stack" class="stack">
         <article id="card" class="card">
           <header class="card-head">
-            <img id="card-avatar" class="px avatar" alt="">
+            <img id="card-avatar" class="avatar" alt="">
             <div class="who">
               <div id="card-agent" class="agent"></div>
-              <div id="card-project" class="project" hidden></div>
+              <button id="card-project" class="chip" type="button"></button>
             </div>
             <button id="card-menu" class="menu-btn" type="button" aria-label="Меню">⋯</button>
           </header>
-          <p id="card-question" class="question"></p>
+          <div class="q-body">
+            <p id="card-question" class="question"></p>
+            <ul id="card-options" class="options"></ul>
+            <button id="more" class="link small" type="button" hidden>подробнее</button>
+            <p id="card-full" class="full" hidden></p>
+          </div>
+          <div class="who-does">
+            <span class="label">Кто делает:</span>
+            <div id="assignees" class="assignees"></div>
+          </div>
           <div class="answer-row">
             <textarea id="card-answer" class="answer" rows="2" placeholder="Ответить текстом"></textarea>
-            <button id="send" class="btn send" type="button" disabled>➤</button>
+            <button id="send" class="btn send" type="button" disabled aria-label="Отправить">➤</button>
           </div>
           <div id="stamp" class="stamp" hidden></div>
         </article>
       </div>
       <nav class="deck-nav">
-        <button id="btn-no" class="btn wide" type="button">Нет</button>
-        <button id="btn-later" class="btn wide" type="button">Отложить</button>
-        <button id="btn-yes" class="btn wide yes" type="button">Да</button>
+        <button id="btn-no" class="act" type="button"><img src="/img/no.webp" alt=""><span>Нет</span></button>
+        <button id="btn-later" class="act" type="button"><img src="/img/later.webp" alt=""><span>Отложить</span></button>
+        <button id="btn-yes" class="act" type="button"><img src="/img/yes.webp" alt=""><span>Да</span></button>
       </nav>
-      <div class="deck-foot">
-        <span id="counter" class="counter"></span>
-        <button id="btn-skip" class="link" type="button">пропустить</button>
-      </div>
+      <p id="deferred" class="status on-bg small-text"></p>
     </div>
-    <div id="empty" class="stub" hidden>
-      <img src="/avatars/pam.svg" alt="" class="px stub-img">
-      <p>Всё отвечено.</p>
+    <div id="empty" class="panel empty" hidden>
+      <img src="/img/empty.webp" alt="" class="empty-img">
+      <p class="empty-title">На сегодня всё.</p>
+      <p id="empty-deferred" class="status"></p>
     </div>
   </section>
 
   <!-- Проекты -->
   <section id="tab-projects" class="tab" hidden>
-    <div id="projects-view">
-      <div id="projects-status" class="status">Загружаю проекты…</div>
-      <ul id="projects" class="list"></ul>
-    </div>
-    <div id="project-view" hidden>
-      <div class="row-head">
-        <button id="back" class="btn small" type="button">‹ Проекты</button>
-        <button id="add-task" class="btn small" type="button">+ Задача</button>
+    <div class="panel">
+      <div id="projects-view">
+        <h2>Проекты</h2>
+        <div id="projects-status" class="status">Загружаю проекты…</div>
+        <ul id="projects" class="list"></ul>
+        <button id="others-toggle" class="link" type="button" hidden></button>
+        <ul id="others" class="list" hidden></ul>
       </div>
-      <h2 id="project-title"></h2>
-      <div id="tasks-status" class="status"></div>
-      <ul id="tasks" class="list"></ul>
+      <div id="project-view" hidden>
+        <div class="row-head">
+          <button id="back" class="btn small" type="button">‹ Проекты</button>
+          <button id="add-task" class="btn small" type="button">+ Задача</button>
+        </div>
+        <h2 id="project-title"></h2>
+        <div id="tasks-status" class="status"></div>
+        <div id="project-sections"></div>
+      </div>
     </div>
   </section>
 </main>
@@ -86,7 +104,7 @@
 <div id="sheet-bg" class="sheet-bg" hidden></div>
 
 <div id="sheet-snooze" class="sheet" hidden>
-  <h3>Вернуть карточку</h3>
+  <h3><img src="/img/later.webp" alt="" class="ico"> Вернуть карточку</h3>
   <button class="btn wide" data-days="1" type="button">Через 1 день</button>
   <button class="btn wide" data-days="3" type="button">Через 3 дня</button>
   <button class="btn wide" data-days="5" type="button">Через 5 дней</button>
@@ -96,8 +114,26 @@
 </div>
 
 <div id="sheet-menu" class="sheet" hidden>
-  <button id="menu-remove" class="btn wide danger" type="button">Снять — больше не спрашивать</button>
+  <button id="menu-remove" class="btn wide danger" type="button"><img src="/img/forget.webp" alt="" class="ico"> Снять — больше не спрашивать</button>
   <button class="link close" type="button">отмена</button>
+</div>
+
+<div id="sheet-project" class="sheet" hidden>
+  <h3>Проект вопроса</h3>
+  <ul id="project-choices" class="list compact"></ul>
+  <button class="link close" type="button">отмена</button>
+</div>
+
+<div id="sheet-help" class="sheet" hidden>
+  <h3>Как отвечать</h3>
+  <ul class="help">
+    <li><img src="/img/yes.webp" alt=""><span><b>Вправо — «Да».</b> Ответ записан в улей, исполнитель — кого выбрали в «Кто делает».</span></li>
+    <li><img src="/img/no.webp" alt=""><span><b>Влево — «Нет».</b> Не сейчас: карточка вернётся через 3 дня.</span></li>
+    <li><img src="/img/later.webp" alt=""><span><b>Вверх — «Отложить».</b> Выберите день, в этот день карточка вернётся.</span></li>
+    <li><img src="/img/forget.webp" alt=""><span><b>«⋯» → «Снять».</b> Больше не спрашивать.</span></li>
+  </ul>
+  <p class="small-text">Можно ответить текстом в поле и нажать ➤. Кнопки внизу делают то же, что свайпы.</p>
+  <button class="btn wide close" type="button">Понятно</button>
 </div>
 
 <div id="sheet-reminder" class="sheet" hidden>

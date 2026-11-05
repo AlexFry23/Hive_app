@@ -34,7 +34,7 @@ sys.path.insert(0, str(HERE))
 import actions  # noqa: E402
 import notifier  # noqa: E402
 import today  # noqa: E402
-from cards import AGENTS, clean_projects, make_cards  # noqa: E402
+from cards import ACTIVE_STATUSES, AGENTS, CLOSED_STATUSES, clean_projects, make_cards, record_project, summarize, full_text  # noqa: E402
 from registry import Registry, RegistryError, load_key  # noqa: E402
 from store import ASSIGNEES, MSK, Store, now  # noqa: E402
 from telegram_auth import AuthError, check_init_data  # noqa: E402
@@ -122,24 +122,43 @@ class App:
     def cards(self):
         projects = self.projects()['projects']
         state = self.registry.state()
-        states = self.store.card_states()
+        records = state.get('records') or []
+        # отсрочка самого улья видна только в полной записи — читаем её для paused (кэш по ревизии)
+        for rec in records:
+            if rec.get('status') == 'paused' and rec.get('type') == 'question' and rec.get('waiting_on') == 'alexander':
+                try:
+                    rec['_raw'] = self.registry.record_cached(rec['id'], rec.get('revision'))
+                except RegistryError:
+                    pass
         at = now()
-        out = []
-        for c in make_cards(state.get('records') or [], projects):
+        made, hive_deferred = make_cards(records, projects, self.store.record_projects(), at)
+        states = self.store.card_states()
+        out, later = [], [u for _, u in hive_deferred]
+        for c in made:
             row = states.get(c['id'])
             if self.store.hidden(row, at):
+                if row and row['state'] in ('snoozed', 'skipped') and row.get('until'):
+                    later.append(dt.datetime.fromisoformat(row['until']))
                 continue
             c['draft'] = (row or {}).get('draft') or ''
             out.append(c)
-        return {'cards': out, 'revision': state.get('revision')}
+        nxt = min(later) if later else None
+        return {'cards': out, 'revision': state.get('revision'),
+                'deferred': {'count': len(later), 'next': nxt.astimezone(MSK).date().isoformat() if nxt else None}}
 
     def card_action(self, record_id, verb, body):
         s, r = self.store, self.registry
         draft = body.get('draft')
         if verb == 'yes':
-            return actions.yes(r, s, record_id, body.get('text', ''))
+            return actions.yes(r, s, record_id, body.get('text', ''), body.get('assignee'))
         if verb == 'answer':
-            return actions.answer(r, s, record_id, body.get('text', ''))
+            return actions.answer(r, s, record_id, body.get('text', ''), body.get('assignee'))
+        if verb == 'project':
+            pid = body.get('project_id') or None
+            if pid and not self.project_by_id(pid):
+                raise actions.ActionError('Нет такого проекта')
+            s.set_record_project(record_id, pid)
+            return {'status': 'saved', 'project_id': pid}
         if verb == 'remove':
             return actions.remove(r, s, record_id)
         if verb == 'no':
@@ -156,6 +175,47 @@ class App:
         except RegistryError:
             records = []
         return today.build(now(), self.store.reminders(), self.store.tasks(), records)
+
+    def project_items(self):
+        """Записи реестра по проектам (этап 4.1, п. 3): ждут Александра, открытые, закрытые за 7 дней."""
+        projects = self.projects()['projects']
+        try:
+            records = self.registry.state().get('records') or []
+        except RegistryError:
+            records = []
+        local = self.store.record_projects()
+        week_ago = now() - dt.timedelta(days=7)
+        groups = {}
+        for rec in records:
+            if rec.get('type') not in ('question', 'task'):
+                continue
+            p, how = record_project(rec, projects, local)
+            if not p:
+                continue
+            status = rec.get('status')
+            qa = rec.get('humanqa') or {}
+            if status in CLOSED_STATUSES:
+                when = None
+                for v in (qa.get('answeredAt'), qa.get('withdrawnAt'), rec.get('waiting_on_at'), rec.get('accepted_at')):
+                    try:
+                        when = dt.datetime.fromisoformat(str(v).replace('Z', '+00:00')) if v else None
+                    except ValueError:
+                        when = None
+                    if when and when.tzinfo:
+                        break
+                    when = None
+                if not when or when < week_ago:
+                    continue
+                bucket = 'closed'
+            elif status in ACTIVE_STATUSES:
+                bucket = 'waiting' if rec.get('waiting_on') == 'alexander' else 'open'
+            else:
+                continue
+            head, _ = summarize(full_text(rec), rec.get('title'))
+            groups.setdefault(p['id'], {'waiting': [], 'open': [], 'closed': []})[bucket].append({
+                'id': rec.get('id'), 'type': rec.get('type'), 'title': head, 'status': status,
+                'due': rec.get('due'), 'how': how})
+        return groups
 
     def project_by_id(self, pid):
         return next((p for p in self.projects()['projects'] if p.get('id') == pid), None)
@@ -275,20 +335,28 @@ def make_handler(cfg, registry, status, store=None):
                 for t in store.tasks():
                     if not t['done']:
                         counts[t['project_id']] = counts.get(t['project_id'], 0) + 1
+                items = app.project_items()
                 for p in data['projects']:
+                    g = items.get(p['id'], {})
                     p['open_tasks'] = counts.get(p['id'], 0)
+                    p['waiting'] = len(g.get('waiting', []))
+                    p['open'] = len(g.get('open', []))
+                    p['closed'] = len(g.get('closed', []))
+                    p['empty'] = not (p['open_tasks'] or p['waiting'] or p['open'] or p['closed']
+                                      or any(t['project_id'] == p['id'] for t in store.tasks()))
                 return self.send(200, data)
             m = re.fullmatch(r'/api/projects/([^/]+)/tasks', path)
             if m:
                 pid = urllib.parse.unquote(m.group(1))
                 if not app.project_by_id(pid):
                     raise actions.ActionError('Нет такого проекта', 404)
-                return self.send(200, {'tasks': store.tasks(pid)})
+                g = app.project_items().get(pid, {'waiting': [], 'open': [], 'closed': []})
+                return self.send(200, {'tasks': store.tasks(pid), 'registry': g})
             return self.send(404, {'error': 'нет такого адреса'})
 
         def route_post(self, path):
             body = self.body()
-            m = re.fullmatch(r'/api/cards/([^/]+)/(yes|answer|no|snooze|skip|remove)', path)
+            m = re.fullmatch(r'/api/cards/([^/]+)/(yes|answer|no|snooze|skip|remove|project)', path)
             if m:
                 rid = urllib.parse.unquote(m.group(1))
                 if not RECORD_ID.match(rid):

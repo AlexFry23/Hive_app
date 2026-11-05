@@ -7,7 +7,7 @@ expected_revision; «сохранено» — только после обрат
 """
 import datetime as dt
 
-from cards import is_waiting
+from cards import AGENT_NAMES_RU, is_waiting
 from registry import Conflict, RegistryError, Unconfirmed
 from store import MSK, iso, msk_day_start, now
 
@@ -15,7 +15,7 @@ from store import MSK, iso, msk_day_start, now
 SOURCE = {'path': 'Личный сайт — ввод Александра', 'line': 1, 'via': 'мини-приложение'}
 AUTHOR = 'Александр'
 REMOVE_REASON = 'Снято Александром: больше не спрашивать'
-NO_DAYS = 7  # «Нет» = «не сейчас» = отложить на 7 дней (решение 4)
+NO_DAYS = 3  # «Нет» = «не сейчас» = отложить на 3 дня (решение 4, 05.11)
 
 
 class ActionError(Exception):
@@ -86,9 +86,31 @@ def stamp():
     return iso(now())
 
 
-def yes(registry, store, record_id, text=''):
-    text = (text or '').strip()
-    answer = 'Да' + ('. ' + text if text else '')
+def assignee_line(assignee):
+    """Исполнитель строкой в тексте ответа (решение 25): реестр не принимает поле исполнителя."""
+    if not assignee:
+        return ''
+    if assignee == 'me':
+        return 'Делаю сам.'
+    if assignee not in AGENT_NAMES_RU:
+        raise ActionError('Исполнитель — только из списка')
+    return 'Делает: ' + AGENT_NAMES_RU[assignee] + '.'
+
+
+def _join(*parts):
+    out = ''
+    for p in parts:
+        p = (p or '').strip()
+        if not p:
+            continue
+        if out and out[-1] not in '.!?':
+            out += '.'
+        out = (out + ' ' + p).strip()
+    return out
+
+
+def yes(registry, store, record_id, text='', assignee=None):
+    answer = _join('Да', text, assignee_line(assignee))
     out = write(registry, store, record_id, 'yes', lambda rec: {
         'action': 'answer', 'text': answer, 'coverage': 'full', 'author': AUTHOR,
         'source': SOURCE, 'source_date': stamp()})
@@ -96,12 +118,13 @@ def yes(registry, store, record_id, text=''):
     return out
 
 
-def answer(registry, store, record_id, text):
+def answer(registry, store, record_id, text, assignee=None):
     text = (text or '').strip()
     if not text:
         raise ActionError('Пустой ответ')
+    full = _join(text, assignee_line(assignee))
     out = write(registry, store, record_id, 'answer', lambda rec: {
-        'action': 'answer', 'text': text, 'coverage': 'full', 'author': AUTHOR,
+        'action': 'answer', 'text': full, 'coverage': 'full', 'author': AUTHOR,
         'source': SOURCE, 'source_date': stamp()})
     store.set_card(record_id, 'answered', draft='')
     return out

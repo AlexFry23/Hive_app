@@ -16,6 +16,11 @@ CREATE TABLE IF NOT EXISTS cards (
   draft TEXT,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS record_projects (
+  record_id TEXT PRIMARY KEY,     -- запись реестра
+  project_id TEXT NOT NULL,       -- id папки из projects.json (решение 26)
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ops (
   operation_id TEXT PRIMARY KEY,
   record_id TEXT NOT NULL,
@@ -48,7 +53,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 """
 
-ASSIGNEES = {'michael': 'Michael', 'pam': 'Pam', 'oscar': 'Oscar', 'kevin': 'Kevin', 'me': 'я сам'}
+ASSIGNEES = {'michael': 'Michael', 'pam': 'Pam', 'oscar': 'Oscar', 'kevin': 'Kevin', 'dwight': 'Dwight', 'me': 'я сам'}
 
 
 def now():
@@ -115,6 +120,17 @@ class Store:
             return True
         until = parse(row.get('until'))
         return bool(until and until > (at or now()))
+
+    # --- проект записи реестра, выбранный в приложении ---
+    def set_record_project(self, record_id, project_id):
+        if not project_id:
+            return self._exec('DELETE FROM record_projects WHERE record_id=?', (record_id,)).rowcount
+        return self._exec('INSERT INTO record_projects VALUES(?,?,?) ON CONFLICT(record_id) DO UPDATE SET '
+                          'project_id=excluded.project_id, updated_at=excluded.updated_at',
+                          (record_id, project_id, iso(now()))).rowcount
+
+    def record_projects(self):
+        return {r['record_id']: r['project_id'] for r in self._all('SELECT * FROM record_projects')}
 
     # --- журнал записей в реестр ---
     def op_start(self, record_id, kind, request):

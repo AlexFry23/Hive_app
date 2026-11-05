@@ -50,7 +50,14 @@ RECORDS = [
     {'id': 'Q-7', 'type': 'question', 'status': 'paused', 'waiting_on': 'alexander', 'title': 'На паузе', 'revision': 1},
     {'id': 'Q-8', 'type': 'question', 'status': 'open', 'waiting_on': 'alexander', 'owner': 'pam-x', 'revision': 1,
      'title': 'Старая таблица', 'humanqa': {'q': '| К2 | Аренда |'}, 'updated_at': '2026-11-01T10:00:00+00:00'},
+    {'id': 'Q-9', 'type': 'question', 'status': 'paused', 'waiting_on': 'alexander', 'owner': 'god', 'revision': 2,
+     'title': 'Пауза до даты', 'not_before': '2099-01-01', 'humanqa': {}},
+    {'id': 'Q-10', 'type': 'question', 'status': 'needs_review', 'waiting_on': 'alexander', 'owner': 'dwight-mtbceykx', 'revision': 5,
+     'title': 'Спорный ответ', 'humanqa': {'a': 'старый ответ'}, 'updated_at': '2026-10-30T10:00:00+00:00'},
 ]
+MESSY = {'id': 'Q-11', 'type': 'question', 'status': 'open', 'waiting_on': 'alexander', 'owner': 'kevin-mudo1gxe', 'revision': 1,
+         'title': 'Заявка', 'humanqa': {'q': 'Из карточки MCA-7f3a: см. `/opt/hive/x.md` и T-abc123\n**Подавать заявку по участку 396?**\n'
+                                              'Варианты:\n- подать сейчас\n- ждать ответа юриста (`Q-4f8228303b092fdc`)\n'}}
 PROJECTS = [{'name': 'Вардане', 'id': 'a'}, {'name': 'Дубли', 'id': 'b'}, {'name': '_Рынок_и_конкуренты', 'id': 'c'},
             {'name': 'ГК Основа', 'id': 'd'}]
 
@@ -168,11 +175,31 @@ class AuthTest(unittest.TestCase):
 
 class CardsTest(unittest.TestCase):
     def test_filter_and_order(self):
-        got = cards.make_cards(RECORDS, PROJECTS)
-        self.assertEqual([c['id'] for c in got], ['Q-2', 'Q-1', 'Q-8'])
+        got, deferred = cards.make_cards(RECORDS, PROJECTS)
+        self.assertEqual([c['id'] for c in got], ['Q-2', 'Q-1', 'Q-8', 'Q-10', 'Q-7'])
+        self.assertEqual([d[0] for d in deferred], ['Q-9'])  # отсрочка улья до 2099 года
+        # отсрочка из полной записи (в сводке /api/state поля not_before нет)
+        row = {k: v for k, v in RECORDS[8].items() if k != 'not_before'}
+        self.assertEqual(len(cards.make_cards([row], PROJECTS)[0]), 1)
+        self.assertEqual(len(cards.make_cards([dict(row, _raw=RECORDS[8])], PROJECTS)[1]), 1)
+
+    def test_clean_text(self):
+        (c,), _ = cards.make_cards([MESSY], PROJECTS)
+        self.assertEqual(c['question'], 'Подавать заявку по участку 396?')
+        self.assertEqual(c['options'], ['подать сейчас', 'ждать ответа юриста'])
+        for junk in ('MCA-', '/opt/', '`', 'T-abc', 'карточк'):
+            self.assertNotIn(junk, c['question'] + ' '.join(c['options']) + c['full'])
+        self.assertIn('Варианты', c['full'])
+
+    def test_project_priority(self):
+        r = dict(RECORDS[1], project='d')
+        projects = cards.clean_projects(PROJECTS)
+        self.assertEqual(cards.record_project(r, projects, {'Q-2': 'a'})[0]['name'], 'ГК Основа')
+        self.assertEqual(cards.record_project(RECORDS[1], projects, {'Q-2': 'a'}), ({'name': 'Вардане', 'id': 'a'}, 'app'))
+        self.assertEqual(cards.record_project(RECORDS[0], projects)[1], 'guess')
 
     def test_fields(self):
-        c = {x['id']: x for x in cards.make_cards(RECORDS, PROJECTS)}
+        c = {x['id']: x for x in cards.make_cards(RECORDS, PROJECTS)[0]}
         self.assertEqual(c['Q-1']['agent_name'], 'Michael')
         self.assertEqual(c['Q-1']['question'], 'Подавать заявку по Вардане?')
         self.assertEqual(c['Q-1']['project'], 'Вардане')
@@ -278,7 +305,9 @@ class ServerTest(Base):
         self.assertEqual(REG.posts, [])
 
     def test_cards(self):
-        self.assertEqual(self.ids(), ['Q-2', 'Q-1', 'Q-8'])
+        self.assertEqual(self.ids(), ['Q-2', 'Q-1', 'Q-8', 'Q-10', 'Q-7'])  # Q-9 отложен самим ульем
+        d = self.call('/api/cards')[1]['deferred']
+        self.assertEqual(d, {'count': 1, 'next': '2099-01-01'})
 
 
 class GesturesTest(Base):
@@ -289,6 +318,30 @@ class GesturesTest(Base):
         self.assertEqual(REG.posts[0]['expected_revision'], 3)
         self.assertNotIn('Q-1', self.ids())
         self.assertEqual(self.store.ops()[0]['status'], 'saved')
+
+    def test_assignee_in_text(self):
+        self.call('/api/cards/Q-1/yes', {'text': 'подавай', 'assignee': 'pam'})
+        self.assertEqual(REG.records['Q-1']['humanqa']['a'], 'Да. подавай. Делает: Пэм.')
+        self.call('/api/cards/Q-2/answer', {'text': 'Оплачу сам', 'assignee': 'me'})
+        self.assertEqual(REG.records['Q-2']['humanqa']['a'], 'Оплачу сам. Делаю сам.')
+        self.assertEqual(self.call('/api/cards/Q-8/yes', {'assignee': 'creed'})[0], 400)
+
+    def test_needs_review_answer(self):
+        code, body = self.call('/api/cards/Q-10/yes', {})
+        self.assertEqual((code, body['status']), (200, 'saved'))
+        self.assertNotIn('Q-10', self.ids())
+
+    def test_card_project(self):
+        self.assertEqual(self.call('/api/cards/Q-2/project', {'project_id': 'd'})[0], 200)
+        c = {x['id']: x for x in self.call('/api/cards')[1]['cards']}
+        self.assertEqual((c['Q-2']['project'], c['Q-2']['project_how']), ('ГК Основа', 'app'))
+        self.assertEqual(self.call('/api/cards/Q-2/project', {'project_id': 'b'})[0], 400)
+        self.assertEqual(REG.posts, [])  # проект в реестр не пишется (решение 26)
+        projects = {p['id']: p for p in self.call('/api/projects')[1]['projects']}
+        self.assertEqual(projects['d']['waiting'], 1)
+        self.assertFalse(projects['d']['empty'])
+        reg = self.call('/api/projects/d/tasks')[1]['registry']
+        self.assertEqual([i['id'] for i in reg['waiting']], ['Q-2'])
 
     def test_yes_plain(self):
         self.call('/api/cards/Q-2/yes', {})
@@ -306,7 +359,7 @@ class GesturesTest(Base):
         self.assertEqual(REG.records['Q-1']['humanqa']['withdrawn'], 'Снято Александром: больше не спрашивать')
         self.assertNotIn('Q-1', self.ids())
 
-    def test_no_is_local_snooze_7_days(self):
+    def test_no_is_local_snooze_3_days(self):
         code, body = self.call('/api/cards/Q-1/no', {'draft': 'черновик'})
         self.assertEqual(code, 200)
         self.assertEqual(REG.posts, [])
@@ -315,7 +368,10 @@ class GesturesTest(Base):
         self.assertEqual(row['draft'], 'черновик')
         until = dt.datetime.fromisoformat(row['until'])
         days = (until.astimezone(MSK).date() - dt.datetime.now(MSK).date()).days
-        self.assertEqual(days, 7)
+        self.assertEqual(days, 3)
+        d = self.call('/api/cards')[1]['deferred']
+        self.assertEqual(d['count'], 2)
+        self.assertEqual(d['next'], until.astimezone(MSK).date().isoformat())
         self.assertFalse(self.store.hidden(row, until + dt.timedelta(seconds=1)))
 
     def test_snooze(self):
