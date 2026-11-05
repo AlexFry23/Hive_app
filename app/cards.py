@@ -188,7 +188,10 @@ def make_cards(records, projects=(), local_projects=None, at=None):
             'project_id': p['id'] if p else None,
             'project_how': how,
             'status': r.get('status'),
+            'paused': r.get('status') == 'paused',  # на паузе в улье без даты возврата
             'updated_at': r.get('updated_at') or r.get('waiting_on_at'),
         })
+    # свежие сверху; паузы улья без даты — отдельной стопкой в конце (предложение Майкла 05.11, В-2)
     cards.sort(key=lambda c: str(c.get('updated_at') or ''), reverse=True)
+    cards.sort(key=lambda c: c['paused'])
     return cards, deferred

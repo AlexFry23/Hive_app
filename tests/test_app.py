@@ -177,6 +177,7 @@ class CardsTest(unittest.TestCase):
     def test_filter_and_order(self):
         got, deferred = cards.make_cards(RECORDS, PROJECTS)
         self.assertEqual([c['id'] for c in got], ['Q-2', 'Q-1', 'Q-8', 'Q-10', 'Q-7'])
+        self.assertTrue(got[-1]['paused'])  # пауза улья без даты — в конце
         self.assertEqual([d[0] for d in deferred], ['Q-9'])  # отсрочка улья до 2099 года
         # отсрочка из полной записи (в сводке /api/state поля not_before нет)
         row = {k: v for k, v in RECORDS[8].items() if k != 'not_before'}

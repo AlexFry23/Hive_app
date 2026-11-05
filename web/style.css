@@ -68,6 +68,7 @@ h3 { font-size: 16px; margin: 0 0 12px; display: flex; align-items: center; gap:
 .agent { font-weight: 700; font-size: 18px; }
 .chip { font: inherit; font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 2px solid var(--line); background: var(--accent); color: #fff; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip.empty { background: transparent; color: var(--accent); border-style: dashed; }
+.note { font-size: 12px; color: var(--later); }
 .menu-btn { font: inherit; font-size: 24px; background: none; border: 0; color: var(--ink); padding: 0 6px; align-self: flex-start; cursor: pointer; }
 .q-body { flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .question { margin: 0; font-size: 17px; font-weight: 700; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -130,6 +130,7 @@
     var chip = $('card-project');
     chip.textContent = c.project ? nice(c.project) : '+ Проект';
     chip.className = 'chip' + (c.project ? '' : ' empty');
+    $('card-paused').hidden = !c.paused;
     renderAssignees(c);
     answer.value = c.draft || '';
     $('send').disabled = !answer.value.trim();
