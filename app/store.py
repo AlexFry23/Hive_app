@@ -105,6 +105,9 @@ class Store:
                    'draft=excluded.draft, updated_at=excluded.updated_at',
                    (record_id, state, iso(until) if until else None, draft, iso(now())))
 
+    def clear_card(self, record_id):
+        return self._exec('DELETE FROM cards WHERE record_id=?', (record_id,)).rowcount
+
     def card(self, record_id):
         rows = self._all('SELECT * FROM cards WHERE record_id=?', (record_id,))
         return rows[0] if rows else None

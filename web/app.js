@@ -247,6 +247,80 @@
     }).catch(function (e) { $('deck-status').textContent = e.message; });
   }
 
+  // ---------- Планёрка: всё на паузе, каждой паузе — дата ----------
+  var planItem = null;
+  function planBadge(counts) {
+    var n = (counts.due || 0) + (counts.nodate || 0), b = $('open-planerka');
+    b.textContent = n ? 'Планёрка · ' + n : 'Планёрка';
+    b.classList.toggle('hot', !!n);
+  }
+  function loadPlanBadge() { api('/api/planerka').then(function (p) { planBadge(p.counts); }).catch(function () {}); }
+  function showPlanerka(on) {
+    $('planerka-view').hidden = !on; $('waiting-main').hidden = on;
+    $('counter').style.visibility = on ? 'hidden' : '';
+    if (on) loadPlanerka(); else loadCards();
+  }
+  $('open-planerka').addEventListener('click', function () { showPlanerka(true); });
+  $('planerka-back').addEventListener('click', function () { showPlanerka(false); });
+  function planRow(i) {
+    var li = el('li');
+    var img = el('img', 'mini'); img.src = '/img/' + i.agent + '.webp'; img.alt = ''; li.appendChild(img);
+    var main = el('div', 'main'); main.appendChild(el('div', '', i.title));
+    var sub = [i.type === 'question' ? 'вопрос' : 'дело улья', i.agent_name];
+    if (i.pause_reason) sub.push(i.pause_reason);
+    main.appendChild(el('div', 'sub', sub.join(' · ')));
+    li.appendChild(main);
+    if (i.date) li.appendChild(el('span', 'tag' + (i.bucket === 'due' ? ' hot' : ''), shortDay(i.date)));
+    li.addEventListener('click', function () { openPlan(i); });
+    return li;
+  }
+  function loadPlanerka() {
+    $('planerka-status').textContent = 'Загружаю…'; var box = $('planerka-sections'); box.innerHTML = '';
+    api('/api/planerka').then(function (p) {
+      planBadge(p.counts);
+      $('planerka-status').textContent = p.items.length ? '' : 'На паузе ничего нет.';
+      [['due', 'Пора решить'], ['nodate', 'Без даты — назначьте'], ['dated', 'С датой']].forEach(function (g) {
+        var items = p.items.filter(function (i) { return i.bucket === g[0]; });
+        if (!items.length) return;
+        box.appendChild(el('h4', '', g[1] + ' · ' + items.length));
+        var ul = el('ul', 'list'); items.forEach(function (i) { ul.appendChild(planRow(i)); }); box.appendChild(ul);
+      });
+    }).catch(function (e) { $('planerka-status').textContent = e.message; });
+  }
+  function openPlan(i) {
+    planItem = i;
+    $('plan-title').textContent = i.title;
+    $('plan-sub').textContent = (i.type === 'question' ? 'Вопрос' : 'Дело улья') + ' · ' + i.agent_name + (i.date ? ' · сейчас: ' + shortDay(i.date) : ' · без даты');
+    $('plan-now').hidden = $('plan-remove').hidden = i.type !== 'question';
+    $('plan-date').min = tomorrowIso(); $('plan-date').value = '';
+    showSheet('sheet-plan');
+  }
+  function planDone(msg) { closeSheet(); haptic('ok'); toast(msg); loadPlanerka(); }
+  function planDate(body) {
+    api('/api/planerka/' + encodeURIComponent(planItem.id) + '/date', body).then(function (r) {
+      planDone('Вернётся ' + shortDay(r.day) + (r.status === 'saved' ? ' — записано в улей' : ''));
+    }).catch(function (e) { toast(e.message); });
+  }
+  document.querySelectorAll('#sheet-plan [data-plan-days]').forEach(function (b) {
+    b.addEventListener('click', function () { planDate({ days: +b.dataset.planDays }); });
+  });
+  $('plan-date-ok').addEventListener('click', function () {
+    var v = $('plan-date').value; if (!v) { toast('Выберите дату'); return; }
+    planDate({ date: v });
+  });
+  $('plan-now').addEventListener('click', function () {
+    api('/api/planerka/' + encodeURIComponent(planItem.id) + '/now', {}).then(function () { planDone('Вопрос в колоде'); })
+      .catch(function (e) { toast(e.message); });
+  });
+  $('plan-remove').addEventListener('click', function () {
+    var i = planItem; closeSheet();
+    confirmBox('Снять вопрос и больше не спрашивать?', function (ok) {
+      if (!ok) return;
+      api('/api/cards/' + encodeURIComponent(i.id) + '/remove', {}).then(function () { planDone('Снято'); })
+        .catch(function (e) { toast(e.message); });
+    });
+  });
+
   // ---------- «Сегодня» ----------
   function loadToday() {
     $('today-status').textContent = 'Загружаю…';
@@ -411,5 +485,6 @@
   }
   api('/api/meta').then(function (m) { meta = m; if (cards.length) render(); }).catch(function () {});
   loadCards();
+  loadPlanBadge();
   if (!store('help-seen')) { showSheet('sheet-help'); store('help-seen', '1'); }
 })();

@@ -26,8 +26,21 @@
   <section id="tab-waiting" class="tab">
     <div class="deck-top">
       <span id="counter" class="pill"></span>
-      <button id="help" class="pill round" type="button" aria-label="Подсказка">?</button>
+      <span class="top-right">
+        <button id="open-planerka" class="pill" type="button">Планёрка</button>
+        <button id="help" class="pill round" type="button" aria-label="Подсказка">?</button>
+      </span>
     </div>
+    <div id="planerka-view" class="panel" hidden>
+      <div class="row-head">
+        <button id="planerka-back" class="btn small" type="button">‹ Вопросы</button>
+      </div>
+      <h2>Планёрка</h2>
+      <p class="small-text muted">Всё, что стоит на паузе. У каждой паузы должна быть дата — иначе она никогда не снимется.</p>
+      <div id="planerka-status" class="status">Загружаю…</div>
+      <div id="planerka-sections"></div>
+    </div>
+    <div id="waiting-main">
     <div id="deck-status" class="status on-bg">Загружаю вопросы…</div>
     <div id="deck" hidden>
       <div id="stack" class="stack">
@@ -69,6 +82,7 @@
       <img src="/img/empty.webp" alt="" class="empty-img">
       <p class="empty-title">На сегодня всё.</p>
       <p id="empty-deferred" class="status"></p>
+    </div>
     </div>
   </section>
 
@@ -125,6 +139,20 @@
   <button class="link close" type="button">отмена</button>
 </div>
 
+<div id="sheet-plan" class="sheet" hidden>
+  <h3 id="plan-title"></h3>
+  <p id="plan-sub" class="small-text muted"></p>
+  <span class="label">Вернуться к этому:</span>
+  <button class="btn wide" data-plan-days="7" type="button">Через неделю</button>
+  <button class="btn wide" data-plan-days="14" type="button">Через 2 недели</button>
+  <button class="btn wide" data-plan-days="30" type="button">Через месяц</button>
+  <label class="field">Выбрать дату <input id="plan-date" type="date"></label>
+  <button id="plan-date-ok" class="btn wide" type="button">В этот день</button>
+  <button id="plan-now" class="btn wide" type="button">Решить сейчас — в колоду</button>
+  <button id="plan-remove" class="btn wide danger" type="button"><img src="/img/forget.webp" alt="" class="ico"> Снять — больше не спрашивать</button>
+  <button class="link close" type="button">отмена</button>
+</div>
+
 <div id="sheet-help" class="sheet" hidden>
   <h3>Как отвечать</h3>
   <ul class="help">
@@ -133,6 +161,7 @@
     <li><img src="/img/later.webp" alt=""><span><b>Вверх — «Отложить».</b> Выберите день, в этот день карточка вернётся.</span></li>
     <li><img src="/img/forget.webp" alt=""><span><b>«⋯» → «Снять».</b> Больше не спрашивать.</span></li>
   </ul>
+  <p class="small-text"><b>Планёрка</b> (кнопка вверху) — всё, что стоит на паузе: каждой паузе назначьте дату, когда к ней вернуться.</p>
   <p class="small-text">Можно ответить текстом в поле и нажать ➤. Кнопки внизу делают то же, что свайпы.</p>
   <button class="btn wide close" type="button">Понятно</button>
 </div>

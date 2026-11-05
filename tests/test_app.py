@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
 
 import cards  # noqa: E402
 import notifier  # noqa: E402
+import planerka  # noqa: E402
 import server  # noqa: E402
 import today  # noqa: E402
 from registry import Registry  # noqa: E402
@@ -54,6 +55,8 @@ RECORDS = [
      'title': 'Пауза до даты', 'not_before': '2099-01-01', 'humanqa': {}},
     {'id': 'Q-10', 'type': 'question', 'status': 'needs_review', 'waiting_on': 'alexander', 'owner': 'dwight-mtbceykx', 'revision': 5,
      'title': 'Спорный ответ', 'humanqa': {'a': 'старый ответ'}, 'updated_at': '2026-10-30T10:00:00+00:00'},
+    {'id': 'T-12', 'type': 'task', 'status': 'paused', 'waiting_on': None, 'owner': 'kevin-mudo1gxe', 'revision': 4,
+     'title': 'Скрипт выгрузки', 'pause_reason': 'ждём доступ'},
 ]
 MESSY = {'id': 'Q-11', 'type': 'question', 'status': 'open', 'waiting_on': 'alexander', 'owner': 'kevin-mudo1gxe', 'revision': 1,
          'title': 'Заявка', 'humanqa': {'q': 'Из карточки MCA-7f3a: см. `/opt/hive/x.md` и T-abc123\n**Подавать заявку по участку 396?**\n'
@@ -136,8 +139,8 @@ class FakeRegistry(BaseHTTPRequestHandler):
             return self.reply(409, {'error': 'Запись уже изменена.'})
         assert req['source']['path'] == 'Личный сайт — ввод Александра'
         if req['action'] == 'edit':
-            assert set(req['changes']) == {'project'} and req['reason']
-            r['project'] = req['changes']['project']
+            assert set(req['changes']) <= {'project', 'not_before'} and req['reason']
+            r.update(req['changes'])
             r['revision'] += 1
             REG.revision += 1
             REG.history[op] = {'hash': h}
@@ -362,6 +365,31 @@ class GesturesTest(Base):
         self.assertEqual(REG.posts[-1]['changes'], {'project': 'a'})
         c = {x['id']: x for x in self.call('/api/cards')[1]['cards']}
         self.assertEqual((c['Q-2']['project'], c['Q-2']['project_how']), ('Вардане', 'registry'))
+
+    def test_planerka(self):
+        p = self.call('/api/planerka')[1]
+        got = {i['id']: i['bucket'] for i in p['items']}
+        self.assertEqual(got, {'Q-7': 'nodate', 'T-12': 'nodate', 'Q-9': 'dated'})
+        self.assertEqual(p['counts'], {'due': 0, 'nodate': 2, 'dated': 1})
+        self.assertIn('Q-7', self.ids())  # пока без даты — в конце колоды
+        code, body = self.call('/api/planerka/Q-7/date', {'days': 7})
+        self.assertEqual((code, body['status']), (200, 'saved_local'))  # улей пока не принимает not_before
+        self.assertNotIn('Q-7', self.ids())
+        self.assertEqual({i['id']: i['bucket'] for i in self.call('/api/planerka')[1]['items']}['Q-7'], 'dated')
+        REG.edit_project_supported = True
+        code, body = self.call('/api/planerka/T-12/date', {'days': 30})
+        self.assertEqual(body['status'], 'saved')
+        self.assertEqual(REG.records['T-12']['not_before'], body['day'])
+        self.call('/api/planerka/Q-7/now', {})
+        self.assertIn('Q-7', self.ids())
+        self.assertEqual(self.call('/api/planerka/Q-7/date', {'days': 0})[0], 400)
+
+    def test_planerka_due(self):
+        at = dt.datetime.now(dt.timezone.utc)
+        states = {'Q-7': {'state': 'snoozed', 'until': (at - dt.timedelta(hours=1)).isoformat()}}
+        items = {i['id']: i for i in planerka.build(RECORDS, states, at)['items']}
+        self.assertEqual((items['Q-7']['bucket'], items['Q-7']['date_from']), ('due', 'app'))
+        self.assertEqual(items['T-12']['agent_name'], 'Kevin')
 
     def test_yes_plain(self):
         self.call('/api/cards/Q-2/yes', {})

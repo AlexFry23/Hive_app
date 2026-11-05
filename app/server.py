@@ -33,6 +33,7 @@ sys.path.insert(0, str(HERE))
 
 import actions  # noqa: E402
 import notifier  # noqa: E402
+import planerka  # noqa: E402
 import today  # noqa: E402
 from cards import ACTIVE_STATUSES, AGENTS, CLOSED_STATUSES, clean_projects, make_cards, record_project, summarize, full_text  # noqa: E402
 from registry import Registry, RegistryError, load_key  # noqa: E402
@@ -122,14 +123,7 @@ class App:
     def cards(self):
         projects = self.projects()['projects']
         state = self.registry.state()
-        records = state.get('records') or []
-        # отсрочка самого улья видна только в полной записи — читаем её для paused (кэш по ревизии)
-        for rec in records:
-            if rec.get('status') == 'paused' and rec.get('type') == 'question' and rec.get('waiting_on') == 'alexander':
-                try:
-                    rec['_raw'] = self.registry.record_cached(rec['id'], rec.get('revision'))
-                except RegistryError:
-                    pass
+        records = self.with_raw(state.get('records') or [])
         at = now()
         made, hive_deferred = make_cards(records, projects, self.store.record_projects(), at)
         states = self.store.card_states()
@@ -145,6 +139,21 @@ class App:
         nxt = min(later) if later else None
         return {'cards': out, 'revision': state.get('revision'),
                 'deferred': {'count': len(later), 'next': nxt.astimezone(MSK).date().isoformat() if nxt else None}}
+
+    def with_raw(self, records):
+        """Отсрочка самого улья видна только в полной записи — читаем её для записей на паузе
+        (вопросы Александру и дела улья; кэш по ревизии)."""
+        for rec in records:
+            if planerka.is_paused_item(rec) and '_raw' not in rec:
+                try:
+                    rec['_raw'] = self.registry.record_cached(rec['id'], rec.get('revision'))
+                except RegistryError:
+                    pass
+        return records
+
+    def planerka(self):
+        records = self.with_raw(self.registry.state().get('records') or [])
+        return planerka.build(records, self.store.card_states(), now())
 
     def card_action(self, record_id, verb, body):
         s, r = self.store, self.registry
@@ -326,6 +335,8 @@ def make_handler(cfg, registry, status, store=None):
                 return self.send(200, {'agents': AGENTS, 'assignees': ASSIGNEES, 'skip_days': cfg.skip_days})
             if path == '/api/cards':
                 return self.send(200, app.cards())
+            if path == '/api/planerka':
+                return self.send(200, app.planerka())
             if path == '/api/today':
                 return self.send(200, app.today())
             if path == '/api/projects':
@@ -361,6 +372,14 @@ def make_handler(cfg, registry, status, store=None):
                 if not RECORD_ID.match(rid):
                     raise actions.ActionError('Неверная карточка')
                 return self.send(200, app.card_action(rid, m.group(2), body))
+            m = re.fullmatch(r'/api/planerka/([^/]+)/(date|now)', path)
+            if m:
+                rid = urllib.parse.unquote(m.group(1))
+                if not RECORD_ID.match(rid):
+                    raise actions.ActionError('Неверная запись')
+                if m.group(2) == 'now':
+                    return self.send(200, actions.plan_now(store, rid))
+                return self.send(200, actions.plan_date(registry, store, rid, body.get('days'), body.get('date')))
             if path == '/api/reminders':
                 text = str(body.get('text') or '').strip()
                 if not text:

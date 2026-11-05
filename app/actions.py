@@ -33,13 +33,13 @@ def _readback_ok(kind, rec, result):
     return qa.get('a') is not None
 
 
-def write(registry, store, record_id, kind, build, check=None):
+def write(registry, store, record_id, kind, build, check=None, require_waiting=True):
     """build(record) -> запрос без operation_id/expected_revision."""
     try:
         rec = registry.record(record_id)
     except RegistryError as e:
         raise ActionError('Реестр недоступен, ничего не записано: ' + str(e), 503)
-    if not is_waiting(rec):
+    if require_waiting and not is_waiting(rec):
         return {'status': 'already', 'message': 'Вопрос уже закрыт в улье'}
     req = dict(build(rec), record_id=record_id)
     op = store.op_start(record_id, kind, req)
@@ -52,7 +52,7 @@ def write(registry, store, record_id, kind, build, check=None):
             break
         except Conflict:
             rec = registry.record(record_id)
-            if not is_waiting(rec):
+            if require_waiting and not is_waiting(rec):
                 store.op_finish(op, 'failed', {'reason': 'вопрос закрыт другим путём'})
                 return {'status': 'already', 'message': 'Вопрос уже закрыт в улье'}
             # новая ревизия -> другой запрос -> нужен новый operation_id
@@ -152,6 +152,30 @@ def set_project(registry, store, record_id, project_id):
     if out.get('status') == 'saved':
         return {'status': 'saved', 'project_id': project_id, 'registry': 'записано в улей'}
     return {'status': 'saved_local', 'project_id': project_id, 'registry': out.get('message')}
+
+
+def plan_date(registry, store, record_id, days=None, date=None):
+    """Планёрка (решение 29): дата, когда вернуться к записи на паузе. Сначала в базу приложения —
+    вопрос вернётся в колоду, дело улья — в «Пора решить» Планёрки. Затем попытка записать в улей
+    `not_before` (его уже понимает шлюз вопросов улья); пока улей не принимает — только в приложении."""
+    until = snooze_until(days=days, date=date)
+    store.set_card(record_id, 'snoozed', until=until)
+    day = until.astimezone(MSK).date().isoformat()
+    try:
+        out = write(registry, store, record_id, 'plan', lambda rec: {
+            'action': 'edit', 'changes': {'not_before': day}, 'source': SOURCE,
+            'reason': 'Планёрка: Александр назначил дату возврата'},
+            check=lambda rec: str(rec.get('not_before') or '')[:10] == day, require_waiting=False)
+        where = 'saved' if out.get('status') == 'saved' else 'saved_local'
+    except ActionError:
+        where = 'saved_local'
+    return {'status': where, 'until': iso(until), 'day': day}
+
+
+def plan_now(store, record_id):
+    """Планёрка: «Решить сейчас» — убрать дату приложения, вопрос сразу в колоду."""
+    store.clear_card(record_id)
+    return {'status': 'now'}
 
 
 def snooze_until(days=None, date=None, at=None):

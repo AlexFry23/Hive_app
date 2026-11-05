@@ -58,6 +58,11 @@ h3 { font-size: 16px; margin: 0 0 12px; display: flex; align-items: center; gap:
 
 /* колода */
 .deck-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.top-right { display: flex; gap: 8px; align-items: center; }
+#open-planerka { cursor: pointer; font-weight: 700; }
+#open-planerka.hot { background: var(--later); color: #fff; border-color: #8a5810; }
+.muted { color: var(--muted); }
+.list li .mini { width: 36px; height: 36px; border-radius: 50%; background: var(--paper2); flex: none; }
 .stack { position: relative; touch-action: none; }
 .card { padding: 14px; min-height: 50vh; display: flex; flex-direction: column; gap: 12px; position: relative; will-change: transform; }
 .card.fly { transition: transform .25s ease-out, opacity .25s; }
