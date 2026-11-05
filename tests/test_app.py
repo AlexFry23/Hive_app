@@ -75,6 +75,7 @@ class FakeRegistryState:
         self.posts = []
         self.fail_next_409 = 0
         self.fail_after_commit_503 = 0
+        self.edit_project_supported = False
 
 
 REG = FakeRegistryState()
@@ -125,6 +126,8 @@ class FakeRegistry(BaseHTTPRequestHandler):
             if REG.history[op]['hash'] != h:
                 return self.reply(409, {'error': 'operation_id уже использован для другого запроса'})
             return self.reply(200, {'ok': True, 'idempotent': True, 'revision': REG.revision})
+        if req['action'] == 'edit' and not REG.edit_project_supported:
+            return self.reply(403, {'error': 'Эта операция выполняется через агента'})
         r = REG.records[req['record_id']]
         if REG.fail_next_409:
             REG.fail_next_409 -= 1
@@ -132,6 +135,13 @@ class FakeRegistry(BaseHTTPRequestHandler):
         if req.get('expected_revision') != r['revision']:
             return self.reply(409, {'error': 'Запись уже изменена.'})
         assert req['source']['path'] == 'Личный сайт — ввод Александра'
+        if req['action'] == 'edit':
+            assert set(req['changes']) == {'project'} and req['reason']
+            r['project'] = req['changes']['project']
+            r['revision'] += 1
+            REG.revision += 1
+            REG.history[op] = {'hash': h}
+            return self.reply(200, {'record_id': r['id'], 'record_revision': r['revision']})
         assert req['source_date']
         r.setdefault('humanqa', {})
         if req['action'] == 'answer':
@@ -337,12 +347,21 @@ class GesturesTest(Base):
         c = {x['id']: x for x in self.call('/api/cards')[1]['cards']}
         self.assertEqual((c['Q-2']['project'], c['Q-2']['project_how']), ('ГК Основа', 'app'))
         self.assertEqual(self.call('/api/cards/Q-2/project', {'project_id': 'b'})[0], 400)
-        self.assertEqual(REG.posts, [])  # проект в реестр не пишется (решение 26)
+        self.assertNotIn('project', REG.records['Q-2'])  # улей пока не принимает — только в приложении
         projects = {p['id']: p for p in self.call('/api/projects')[1]['projects']}
         self.assertEqual(projects['d']['waiting'], 1)
         self.assertFalse(projects['d']['empty'])
         reg = self.call('/api/projects/d/tasks')[1]['registry']
         self.assertEqual([i['id'] for i in reg['waiting']], ['Q-2'])
+
+    def test_card_project_to_registry(self):
+        REG.edit_project_supported = True  # после правки ядра Майклом (решение 28)
+        code, body = self.call('/api/cards/Q-2/project', {'project_id': 'a'})
+        self.assertEqual((code, body['status']), (200, 'saved'))
+        self.assertEqual(REG.records['Q-2']['project'], 'a')
+        self.assertEqual(REG.posts[-1]['changes'], {'project': 'a'})
+        c = {x['id']: x for x in self.call('/api/cards')[1]['cards']}
+        self.assertEqual((c['Q-2']['project'], c['Q-2']['project_how']), ('Вардане', 'registry'))
 
     def test_yes_plain(self):
         self.call('/api/cards/Q-2/yes', {})

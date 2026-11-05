@@ -206,8 +206,9 @@
     });
   });
   function setProject(c, id, name) {
-    api('/api/cards/' + encodeURIComponent(c.id) + '/project', { project_id: id }).then(function () {
+    api('/api/cards/' + encodeURIComponent(c.id) + '/project', { project_id: id }).then(function (r) {
       c.project_id = id; c.project = name; closeSheet(); haptic('ok'); render();
+      toast(r.status === 'saved' ? 'Проект записан в улей' : 'Проект сохранён в приложении');
     }).catch(function (e) { toast(e.message); });
   }
 

@@ -33,7 +33,7 @@ def _readback_ok(kind, rec, result):
     return qa.get('a') is not None
 
 
-def write(registry, store, record_id, kind, build):
+def write(registry, store, record_id, kind, build, check=None):
     """build(record) -> запрос без operation_id/expected_revision."""
     try:
         rec = registry.record(record_id)
@@ -75,7 +75,7 @@ def write(registry, store, record_id, kind, build):
     except RegistryError:
         store.op_finish(op, 'pending', {'result': result, 'reason': 'нет обратного чтения'})
         raise ActionError('Записано, но не подтверждено обратным чтением', 503)
-    if not _readback_ok(kind, back, result):
+    if not (check(back) if check else _readback_ok(kind, back, result)):
         store.op_finish(op, 'failed', {'result': result, 'reason': 'обратное чтение не совпало'})
         raise ActionError('Обратное чтение не подтвердило запись', 502)
     store.op_finish(op, 'saved', result)
@@ -135,6 +135,23 @@ def remove(registry, store, record_id):
         'action': 'withdraw_question', 'reason': REMOVE_REASON, 'source': SOURCE, 'source_date': stamp()})
     store.set_card(record_id, 'removed')
     return out
+
+
+def set_project(registry, store, record_id, project_id):
+    """Проект карточки: сначала в базу приложения (решение 26), затем попытка записать в улей
+    (`edit`, `changes.project` — правку ядра делает Майкл, решение 28). Пока улей не принимает —
+    остаётся только в приложении, без ошибки для Александра."""
+    store.set_record_project(record_id, project_id)
+    try:
+        out = write(registry, store, record_id, 'project', lambda rec: {
+            'action': 'edit', 'changes': {'project': project_id}, 'source': SOURCE,
+            'reason': 'Проект выбран Александром в мини-приложении'},
+            check=lambda rec: rec.get('project') == project_id)
+    except ActionError as e:
+        return {'status': 'saved_local', 'project_id': project_id, 'registry': str(e)}
+    if out.get('status') == 'saved':
+        return {'status': 'saved', 'project_id': project_id, 'registry': 'записано в улей'}
+    return {'status': 'saved_local', 'project_id': project_id, 'registry': out.get('message')}
 
 
 def snooze_until(days=None, date=None, at=None):

@@ -157,8 +157,7 @@ class App:
             pid = body.get('project_id') or None
             if pid and not self.project_by_id(pid):
                 raise actions.ActionError('Нет такого проекта')
-            s.set_record_project(record_id, pid)
-            return {'status': 'saved', 'project_id': pid}
+            return actions.set_project(r, s, record_id, pid)
         if verb == 'remove':
             return actions.remove(r, s, record_id)
         if verb == 'no':
