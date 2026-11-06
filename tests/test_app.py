@@ -231,6 +231,33 @@ class CardsTest(unittest.TestCase):
         self.assertEqual([p['name'] for p in cards.clean_projects(PROJECTS)], ['Вардане', 'ГК Основа'])
 
 
+class PanelRuleTest(unittest.TestCase):
+    """Правило панели «Вопросы» (В-5, 06.11): bucket == waiting и canAnswer."""
+    def q(self, **kw):
+        r = {'id': 'Q-x', 'type': 'question', 'status': 'needs_review', 'waiting_on': None, 'humanqa': {}}
+        r.update(kw)
+        return r
+
+    def test_without_waiting_on(self):
+        self.assertTrue(cards.is_waiting(self.q(ball='он')))                       # 20 таких у Майкла
+        self.assertTrue(cards.is_waiting(self.q(humanqa={'source_id': 'qa:123'})))
+        self.assertTrue(cards.is_waiting(self.q(status='open')))
+        self.assertFalse(cards.is_waiting(self.q()))                                # ни одного признака
+        self.assertFalse(cards.is_waiting(self.q(ball='он', question_direction='to_hive')))  # вопрос Александра улью
+        self.assertFalse(cards.is_waiting(self.q(ball='он', continuation={'stage': 'working'})))
+
+    def test_with_waiting_on(self):
+        self.assertTrue(cards.is_waiting(self.q(waiting_on='alexander', status='partial', humanqa={'a': 'часть'})))
+        self.assertFalse(cards.is_waiting(self.q(waiting_on='dwight', status='open')))
+        self.assertFalse(cards.is_waiting(self.q(waiting_on='alexander', status='archived')))
+        self.assertFalse(cards.is_waiting(self.q(waiting_on='alexander', humanqa={'withdrawn': 'x'})))
+        self.assertTrue(cards.is_waiting(self.q(waiting_on='alexander', status='paused')))  # пауза без ответа
+        self.assertFalse(cards.is_waiting(self.q(waiting_on='alexander', status='paused', humanqa={'a': 'да'})))
+        self.assertFalse(cards.is_waiting(self.q(status='merged', ball='он')))
+        self.assertFalse(cards.is_waiting(self.q(topic='Служебное: канарейка', status='open')))
+        self.assertFalse(cards.is_waiting({'id': 'T-1', 'type': 'task', 'status': 'todo', 'waiting_on': 'alexander'}))
+
+
 class TodayTest(unittest.TestCase):
     def test_window_and_order(self):
         at = dt.datetime(2026, 11, 4, 12, 0, tzinfo=MSK)  # среда
@@ -273,7 +300,7 @@ class Base(unittest.TestCase):
 
     def setUp(self):
         REG.reset()
-        for t in ('cards', 'ops', 'reminders', 'tasks'):
+        for t in ('cards', 'ops', 'reminders', 'tasks', 'record_projects'):
             self.store._exec('DELETE FROM ' + t)
 
     def call(self, path, body=None, auth=True):
@@ -391,6 +418,27 @@ class GesturesTest(Base):
         self.assertEqual((items['Q-7']['bucket'], items['Q-7']['date_from']), ('due', 'app'))
         self.assertEqual(items['T-12']['agent_name'], 'Kevin')
 
+    def test_panel_rule_in_deck_and_projects(self):
+        REG.records['Q-20'] = {'id': 'Q-20', 'type': 'question', 'status': 'needs_review', 'waiting_on': None,
+                               'ball': 'он', 'owner': 'oscar-x', 'revision': 1, 'title': 'Вардане: без waiting_on',
+                               'humanqa': {}}
+        REG.records['T-21'] = {'id': 'T-21', 'type': 'task', 'status': 'blocked', 'waiting_on': 'alexander',
+                               'owner': 'kevin-x', 'revision': 1, 'title': 'Дело без проекта'}
+        self.assertIn('Q-20', self.ids())
+        code, body = self.call('/api/cards/Q-20/yes', {})
+        self.assertEqual((code, body['status']), (200, 'saved'))  # без waiting_on тоже записывается
+        projects = {p['id']: p for p in self.call('/api/projects')[1]['projects']}
+        self.assertIn('_none', projects)
+        none = self.call('/api/projects/_none/tasks')[1]['registry']
+        self.assertEqual([i['id'] for i in none['tasks_waiting']], ['T-5', 'T-21'])
+        self.assertIn('Q-2', [i['id'] for i in none['waiting']])
+
+    def test_project_for_task(self):
+        REG.edit_project_supported = True
+        code, body = self.call('/api/cards/T-5/project', {'project_id': 'a'})
+        self.assertEqual(body['status'], 'saved')  # проект можно поставить и делу улья (ловушка из В-5)
+        self.assertEqual(REG.records['T-5']['project'], 'a')
+
     def test_yes_plain(self):
         self.call('/api/cards/Q-2/yes', {})
         self.assertEqual(REG.records['Q-2']['humanqa']['a'], 'Да')
@@ -455,6 +503,7 @@ class GesturesTest(Base):
 
     def test_already_closed(self):
         REG.records['Q-1']['humanqa']['a'] = 'ответили в панели'
+        REG.records['Q-1']['status'] = 'answered'
         code, body = self.call('/api/cards/Q-1/yes', {})
         self.assertEqual((code, body['status']), (200, 'already'))
         self.assertEqual(REG.posts, [])

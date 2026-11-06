@@ -243,7 +243,13 @@
   function loadCards() {
     if (busy) return;
     api('/api/cards').then(function (b) {
-      cards = b.cards || []; deferred = b.deferred || { count: 0, next: null }; render();
+      cards = b.cards || []; deferred = b.deferred || { count: 0, next: null };
+      if (frontId) {
+        var k = cards.findIndex(function (c) { return c.id === frontId; });
+        if (k > 0) cards.unshift(cards.splice(k, 1)[0]);
+        frontId = null;
+      }
+      render();
     }).catch(function (e) { $('deck-status').textContent = e.message; });
   }
 
@@ -295,7 +301,7 @@
     $('plan-date').min = tomorrowIso(); $('plan-date').value = '';
     showSheet('sheet-plan');
   }
-  function planDone(msg) { closeSheet(); haptic('ok'); toast(msg); loadPlanerka(); }
+  function planDone(msg) { closeSheet(); haptic('ok'); toast(msg); loadPlanerka(); if (!$('project-view').hidden) loadTasks(); }
   function planDate(body) {
     api('/api/planerka/' + encodeURIComponent(planItem.id) + '/date', body).then(function (r) {
       planDone('Вернётся ' + shortDay(r.day) + (r.status === 'saved' ? ' — записано в улей' : ''));
@@ -403,6 +409,7 @@
     project = p;
     $('projects-view').hidden = true; $('project-view').hidden = false;
     $('project-title').textContent = nice(p.name);
+    $('add-task').hidden = !!p.virtual;  // «Без проекта» — только просмотр, задачу заводят в проекте
     loadTasks();
   }
   function section(title, items, render) {
@@ -411,15 +418,28 @@
     box.appendChild(el('h4', '', title + ' · ' + items.length));
     var ul = el('ul', 'list'); items.forEach(function (i) { ul.appendChild(render(i)); }); box.appendChild(ul);
   }
-  function hiveRow(i) {
-    var li = el('li'); li.style.cursor = 'default';
+  function hiveRow(i, action) {
+    var li = el('li');
+    if (i.agent) { var img = el('img', 'mini'); img.src = '/img/' + i.agent + '.webp'; img.alt = ''; li.appendChild(img); }
     var main = el('div', 'main'); main.appendChild(el('div', '', i.title));
-    var sub = [i.type === 'question' ? 'вопрос' : 'задача улья'];
+    var sub = [i.type === 'question' ? 'вопрос' : 'дело улья'];
+    if (i.agent_name) sub.push(i.agent_name);
     if (i.due) sub.push('срок ' + shortDay(String(i.due).slice(0, 10)));
     main.appendChild(el('div', 'sub', sub.join(' · ')));
     li.appendChild(main);
+    if (action) li.addEventListener('click', function () { action(i); });
+    else li.style.cursor = 'default';
     return li;
   }
+  // вопрос из проекта — сразу в колоду первой карточкой (снимает своё «Нет»/«Отложить»)
+  var frontId = null;
+  function answerNow(i) {
+    api('/api/planerka/' + encodeURIComponent(i.id) + '/now', {}).then(function () {
+      frontId = i.id;
+      document.querySelector('.tabs button[data-tab="waiting"]').click();
+    }).catch(function (e) { toast(e.message); });
+  }
+  function planTask(i) { openPlan({ id: i.id, type: 'task', title: i.title, agent_name: i.agent_name || '', date: null }); }
   function taskRow(t) {
     var li = el('li', t.done ? 'done' : '');
     var main = el('div', 'main');
@@ -435,13 +455,15 @@
   function loadTasks() {
     $('tasks-status').textContent = 'Загружаю…'; $('project-sections').innerHTML = '';
     api('/api/projects/' + encodeURIComponent(project.id) + '/tasks').then(function (b) {
-      var g = b.registry || { waiting: [], open: [], closed: [] };
-      var total = b.tasks.length + g.waiting.length + g.open.length + g.closed.length;
+      var g = b.registry || {};
+      ['waiting', 'tasks_waiting', 'open', 'closed'].forEach(function (k) { g[k] = g[k] || []; });
+      var total = b.tasks.length + g.waiting.length + g.tasks_waiting.length + g.open.length + g.closed.length;
       $('tasks-status').textContent = total ? '' : 'Здесь пока пусто.';
-      section('Ждут тебя', g.waiting, hiveRow);
-      section('В работе в улье', g.open, hiveRow);
+      section('Вопросы ждут тебя — нажми, чтобы ответить', g.waiting, function (i) { return hiveRow(i, answerNow); });
+      section('Дела улья ждут тебя — нажми, чтобы назначить дату', g.tasks_waiting, function (i) { return hiveRow(i, planTask); });
+      section('В работе в улье', g.open, function (i) { return hiveRow(i); });
       section('Мои задачи', b.tasks, taskRow);
-      section('Закрыто за 7 дней', g.closed, hiveRow);
+      section('Закрыто за 7 дней', g.closed, function (i) { return hiveRow(i); });
     }).catch(function (e) { $('tasks-status').textContent = e.message; });
   }
   $('back').addEventListener('click', loadProjects);

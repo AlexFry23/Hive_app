@@ -35,7 +35,7 @@ import actions  # noqa: E402
 import notifier  # noqa: E402
 import planerka  # noqa: E402
 import today  # noqa: E402
-from cards import ACTIVE_STATUSES, AGENTS, CLOSED_STATUSES, clean_projects, make_cards, record_project, summarize, full_text  # noqa: E402
+from cards import ACTIVE_STATUSES, AGENTS, CLOSED_STATUSES, agent_key, clean_projects, full_text, is_waiting, make_cards, record_project, summarize  # noqa: E402
 from registry import Registry, RegistryError, load_key  # noqa: E402
 from store import ASSIGNEES, MSK, Store, now  # noqa: E402
 from telegram_auth import AuthError, check_init_data  # noqa: E402
@@ -113,6 +113,13 @@ def parse_due(value):
         raise actions.ActionError('Неверная дата срока')
 
 
+NO_PROJECT = '_none'
+
+
+def empty_groups():
+    return {'waiting': [], 'tasks_waiting': [], 'open': [], 'closed': []}
+
+
 class App:
     def __init__(self, cfg, registry, store, status):
         self.cfg, self.registry, self.store, self.status = cfg, registry, store, status
@@ -185,7 +192,9 @@ class App:
         return today.build(now(), self.store.reminders(), self.store.tasks(), records)
 
     def project_items(self):
-        """Записи реестра по проектам (этап 4.1, п. 3): ждут Александра, открытые, закрытые за 7 дней."""
+        """Записи реестра по проектам (этап 4.1, п. 3). Группы: waiting — вопросы по правилу колоды
+        (то же, что панель «Вопросы»), tasks_waiting — дела улья с waiting_on=alexander, open, closed за 7 дней.
+        Записи без проекта — под ключом NO_PROJECT (раньше не показывались нигде, В-5)."""
         projects = self.projects()['projects']
         try:
             records = self.registry.state().get('records') or []
@@ -198,8 +207,7 @@ class App:
             if rec.get('type') not in ('question', 'task'):
                 continue
             p, how = record_project(rec, projects, local)
-            if not p:
-                continue
+            pid = p['id'] if p else NO_PROJECT
             status = rec.get('status')
             qa = rec.get('humanqa') or {}
             if status in CLOSED_STATUSES:
@@ -215,14 +223,23 @@ class App:
                 if not when or when < week_ago:
                     continue
                 bucket = 'closed'
+            elif rec.get('type') == 'question' and is_waiting(rec):
+                bucket = 'waiting'
+            elif rec.get('type') == 'task' and status in ACTIVE_STATUSES and rec.get('waiting_on') == 'alexander':
+                bucket = 'tasks_waiting'
             elif status in ACTIVE_STATUSES:
-                bucket = 'waiting' if rec.get('waiting_on') == 'alexander' else 'open'
+                if not p:
+                    continue  # без проекта показываем только то, что ждёт Александра
+                bucket = 'open'
             else:
                 continue
             head, _ = summarize(full_text(rec), rec.get('title'))
-            groups.setdefault(p['id'], {'waiting': [], 'open': [], 'closed': []})[bucket].append({
+            if not p and bucket == 'closed':
+                continue
+            key = agent_key(rec.get('owner'))
+            groups.setdefault(pid, empty_groups())[bucket].append({
                 'id': rec.get('id'), 'type': rec.get('type'), 'title': head, 'status': status,
-                'due': rec.get('due'), 'how': how})
+                'due': rec.get('due'), 'how': how, 'agent': key, 'agent_name': AGENTS[key]})
         return groups
 
     def project_by_id(self, pid):
@@ -341,6 +358,7 @@ def make_handler(cfg, registry, status, store=None):
                 return self.send(200, app.today())
             if path == '/api/projects':
                 data = app.projects()
+                data['projects'] = data['projects'] + [{'id': NO_PROJECT, 'name': 'Без проекта', 'virtual': True}]
                 counts = {}
                 for t in store.tasks():
                     if not t['done']:
@@ -349,7 +367,7 @@ def make_handler(cfg, registry, status, store=None):
                 for p in data['projects']:
                     g = items.get(p['id'], {})
                     p['open_tasks'] = counts.get(p['id'], 0)
-                    p['waiting'] = len(g.get('waiting', []))
+                    p['waiting'] = len(g.get('waiting', [])) + len(g.get('tasks_waiting', []))
                     p['open'] = len(g.get('open', []))
                     p['closed'] = len(g.get('closed', []))
                     p['empty'] = not (p['open_tasks'] or p['waiting'] or p['open'] or p['closed']
@@ -358,9 +376,9 @@ def make_handler(cfg, registry, status, store=None):
             m = re.fullmatch(r'/api/projects/([^/]+)/tasks', path)
             if m:
                 pid = urllib.parse.unquote(m.group(1))
-                if not app.project_by_id(pid):
+                if pid != NO_PROJECT and not app.project_by_id(pid):
                     raise actions.ActionError('Нет такого проекта', 404)
-                g = app.project_items().get(pid, {'waiting': [], 'open': [], 'closed': []})
+                g = app.project_items().get(pid, empty_groups())
                 return self.send(200, {'tasks': store.tasks(pid), 'registry': g})
             return self.send(404, {'error': 'нет такого адреса'})
 

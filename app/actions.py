@@ -7,7 +7,7 @@ expected_revision; «сохранено» — только после обрат
 """
 import datetime as dt
 
-from cards import AGENT_NAMES_RU, is_waiting
+from cards import AGENT_NAMES_RU, is_answerable
 from registry import Conflict, RegistryError, Unconfirmed
 from store import MSK, iso, msk_day_start, now
 
@@ -39,7 +39,7 @@ def write(registry, store, record_id, kind, build, check=None, require_waiting=T
         rec = registry.record(record_id)
     except RegistryError as e:
         raise ActionError('Реестр недоступен, ничего не записано: ' + str(e), 503)
-    if require_waiting and not is_waiting(rec):
+    if require_waiting and not is_answerable(rec):
         return {'status': 'already', 'message': 'Вопрос уже закрыт в улье'}
     req = dict(build(rec), record_id=record_id)
     op = store.op_start(record_id, kind, req)
@@ -52,7 +52,7 @@ def write(registry, store, record_id, kind, build, check=None, require_waiting=T
             break
         except Conflict:
             rec = registry.record(record_id)
-            if require_waiting and not is_waiting(rec):
+            if require_waiting and not is_answerable(rec):
                 store.op_finish(op, 'failed', {'reason': 'вопрос закрыт другим путём'})
                 return {'status': 'already', 'message': 'Вопрос уже закрыт в улье'}
             # новая ревизия -> другой запрос -> нужен новый operation_id
@@ -146,7 +146,7 @@ def set_project(registry, store, record_id, project_id):
         out = write(registry, store, record_id, 'project', lambda rec: {
             'action': 'edit', 'changes': {'project': project_id}, 'source': SOURCE,
             'reason': 'Проект выбран Александром в мини-приложении'},
-            check=lambda rec: rec.get('project') == project_id)
+            check=lambda rec: rec.get('project') == project_id, require_waiting=False)
     except ActionError as e:
         return {'status': 'saved_local', 'project_id': project_id, 'registry': str(e)}
     if out.get('status') == 'saved':

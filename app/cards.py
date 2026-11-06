@@ -32,18 +32,73 @@ def agent_key(owner):
     return 'michael'
 
 
-def is_waiting(r):
-    if r.get('type') != 'question' or r.get('waiting_on') != 'alexander':
+# Правило панели «Вопросы» улья (index.html улья, функции bucket и canAnswer; описал Майкл 06.11, В-5):
+# вопрос ждёт Александра, если bucket(r) == 'waiting' и canAnswer(r).
+PANEL_STATUSES = {'open', 'needs_review', 'partial', 'proposed', 'conflict', 'doing'}
+
+
+def _stage(r):
+    """continuation.stage из сводки /api/state; у полной записи его нет — считаем так же, как ядро."""
+    cont = r.get('continuation')
+    if isinstance(cont, dict) and cont.get('stage'):
+        return cont['stage']
+    qa = r.get('humanqa') or {}
+    state = (r.get('outcome') or {}).get('state')
+    if qa.get('withdrawn') or state in ('closed_info', 'done_with_evidence'):
+        return 'done'
+    if state == 'assigned' or qa.get('a') is not None or r.get('type') in ('task', 'instruction'):
+        return 'working'
+    return 'waiting'
+
+
+def _ours(r):
+    return r.get('question_direction') == 'to_hive'
+
+
+def panel_waiting(r):
+    """bucket(r) == 'waiting' по правилу панели."""
+    if r.get('status') == 'merged' or str(r.get('topic') or '').startswith('Служебное'):
         return False
-    status = r.get('status')
-    if status not in OPEN_STATUSES:
+    wo = r.get('waiting_on')
+    if r.get('type') == 'question' and r.get('status') in PANEL_STATUSES:
+        if wo == 'alexander':
+            return True
+        if str(wo or '').startswith('agent:'):
+            return False
+    return _stage(r) == 'waiting' and not (r.get('type') == 'question' and _ours(r))
+
+
+def can_answer(r):
+    """canAnswer(r) по правилу панели."""
+    if r.get('type') != 'question' or r.get('status') in ('merged', 'archived', 'paused'):
         return False
     qa = r.get('humanqa') or {}
     if qa.get('withdrawn'):
         return False
-    if qa.get('a') and status != 'needs_review':  # needs_review — ответ есть, но спорный: спросить снова
+    wo = r.get('waiting_on')
+    if wo:
+        return wo == 'alexander' and r.get('status') in PANEL_STATUSES
+    if _ours(r):
         return False
-    return True
+    return (r.get('question_direction') == 'to_owner' or r.get('ball') == 'он' or r.get('status') == 'open'
+            or str(qa.get('source_id') or '').startswith('qa:'))
+
+
+def paused_waiting(r):
+    """Вопрос Александру на паузе без ответа — панель его не показывает, приложение держит (В-2, решение 29)."""
+    qa = r.get('humanqa') or {}
+    return (r.get('type') == 'question' and r.get('status') == 'paused' and r.get('waiting_on') == 'alexander'
+            and not qa.get('withdrawn') and not qa.get('a'))
+
+
+def is_waiting(r):
+    """Колода «Ждёт меня»: как панель «Вопросы» (bucket waiting и canAnswer) плюс паузы без ответа."""
+    return (panel_waiting(r) and can_answer(r)) or paused_waiting(r)
+
+
+def is_answerable(r):
+    """Можно ли ещё записать ответ (проверка перед записью; по полной записи, без сводки)."""
+    return can_answer(r) or paused_waiting(r)
 
 
 def _norm(s):
