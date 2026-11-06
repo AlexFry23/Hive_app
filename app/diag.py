@@ -108,6 +108,10 @@ def main():
     out['app_db_cards_by_state'] = dict(collections.Counter(r['state'] for r in states.values()).most_common())
     out['app_db_ops_by_status'] = dict(collections.Counter(
         r['status'] for r in db.execute('SELECT status FROM ops')).most_common())
+    # последние записи в улей: вид действия, итог и ответ улья (ошибки 403/400 видны здесь)
+    out['last_ops'] = [{'kind': r['kind'], 'status': r['status'], 'record_id': r['record_id'],
+                        'at': r['updated_at'], 'result': (r['result'] or '')[:300]}
+                       for r in db.execute('SELECT * FROM ops ORDER BY updated_at DESC LIMIT 15')]
     print(json.dumps(out, ensure_ascii=False, indent=1))
 
 
